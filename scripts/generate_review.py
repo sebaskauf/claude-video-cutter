@@ -45,10 +45,17 @@ def main():
 
     lines = [f"# V6 Review-Liste ({len(S)} Segmente, {cum/60:.1f} min geschnittenes Video)", ""]
 
-    lines += ["## 🔴 WICHTIG: Content-Gap im Rohmaterial",
-              "- Die **Redirect-URL-Anleitung** (Supabase URL Configuration) wurde angekündigt,",
-              "  aber nie eingesprochen (Ablenkung durch Debugging bei ~52:45 Rohzeit).",
-              "  Die hängende Ankündigung wurde geschnitten. **Entscheiden: nachdrehen oder weglassen.**", ""]
+    # Content-Gaps aus workdir/content_gaps.json (pro Video, nicht hardcoden!)
+    gaps_path = os.path.join(workdir, "content_gaps.json")
+    gaps = (json.load(open(gaps_path)).get("gaps", [])
+            if os.path.exists(gaps_path) else [])
+    if gaps:
+        lines.append("## 🔴 WICHTIG: Content-Gaps im Rohmaterial")
+        for g in gaps:
+            lines.append(f"- {g}")
+        lines.append("")
+    else:
+        lines += ["## Content-Gaps", "- keine — alles Angekündigte wird im Video eingelöst ✓", ""]
 
     lines.append(f"## Graufälle aus der QA ({len(fails_now)} Nähte — bitte kurz reinhören)")
     for r in fails_now:

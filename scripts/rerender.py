@@ -210,6 +210,19 @@ def render_segments(segs, src, out_mp4, mode, broll, workdir):
         os.replace(overlaid, out_mp4)
     else:
         os.replace(base, out_mp4)
+
+    # 6. B-Roll-SYNC-Pass (broll_sync.json im Workdir): parallel aufgenommenes
+    #    Screen-Recording quellzeit-gekoppelt + Facecam-Kreis. Wird bei JEDEM
+    #    Render angewendet (auch Cockpit-Re-Render), Mapping rechnet immer aus
+    #    den aktuellen effektiven Segmenten -> ueberlebt Re-Cuts.
+    sync_cfg = os.path.join(workdir, "broll_sync.json")
+    segs_eff = os.path.join(workdir, "segments_effective.json")
+    if os.path.exists(sync_cfg) and os.path.exists(segs_eff):
+        tmp_sync = out_mp4 + ".sync.mp4"
+        run([sys.executable, os.path.join(HERE, "broll_sync_pass.py"),
+             out_mp4, segs_eff, sync_cfg, tmp_sync, "--mode", mode])
+        os.replace(tmp_sync, out_mp4)
+        print("[rerender] B-Roll-SYNC-Pass angewendet", flush=True)
     print(f"[rerender] FERTIG -> {out_mp4}", flush=True)
 
 if __name__ == "__main__":

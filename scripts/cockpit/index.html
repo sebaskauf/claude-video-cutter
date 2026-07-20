@@ -106,6 +106,21 @@
   .clip .gainline { position: absolute; left: 0; right: 0; height: 3px; margin-top: -1px; background: rgba(255,255,255,.55); cursor: ns-resize; z-index: 2; }
   .clip .gainline:hover, .clip .gainline.dragging { background: var(--accent); height: 4px; }
   .clip.broll-clip { background: var(--broll); }
+  .clip.sync-clip { background: linear-gradient(180deg, #3d2f14, #4a3a1a); border-color: rgba(249,115,22,.4); }
+  .clip.sync-clip .clip-label { color: #fbd9b0; }
+  .clip.sync-clip.off { opacity: .35; background: #26262b; }
+  .clip.sync-clip.selected { border-color: var(--clip-sel); box-shadow: 0 0 0 1px var(--clip-sel); }
+
+  /* Composite-Preview: B-Roll fullscreen + Hauptvideo als Facecam-Kreis (Render-Look) */
+  .canvas-box { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+  .canvas-box video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; max-width: none; max-height: none; }
+  #brollVideo { display: none; z-index: 1; }
+  .canvas-box.pip #brollVideo { display: block; }
+  .canvas-box.pip #video {
+    inset: auto; right: 1.46%; bottom: 3.7%; width: 22.1%; height: 39.28%;
+    object-fit: cover; object-position: 64.3% 50%; border-radius: 50%; z-index: 2;
+    box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 4px 10px rgba(0,0,0,.4);
+  }
   .marquee { position: absolute; top: 0; bottom: 0; background: rgba(249,115,22,.12); border: 1px solid rgba(249,115,22,.6); pointer-events: none; z-index: 6; }
 
   .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 5; pointer-events: none; }
@@ -158,7 +173,12 @@
 
   <div class="stage">
     <div class="preview">
-      <div class="video-wrap"><video id="video" preload="metadata" playsinline aria-label="Proxy-Vorschau"></video></div>
+      <div class="video-wrap">
+        <div class="canvas-box" id="canvasBox">
+          <video id="video" preload="metadata" playsinline aria-label="Proxy-Vorschau"></video>
+          <video id="brollVideo" preload="metadata" playsinline muted aria-hidden="true"></video>
+        </div>
+      </div>
       <div class="transport">
         <button id="btnPlay" aria-label="Abspielen oder pausieren (Leertaste)">▶ Play</button>
         <span class="time" id="timeLabel">0:00,000 / 0:00</span>
@@ -256,7 +276,12 @@
   var peakNorm = 1;              // Display-Normalisierung der Waveform (CapCut-Look)
   var marquee = null;            // aktive Aufzieh-Selektion
 
+  var brollSync = null;             // {name, src_offset, duration, pip} aus broll_sync.json
+  var brollSyncOff = new Set();     // Clip-IDs ohne Sync-Overlay (persistiert)
+
   var video = document.getElementById("video");
+  var brollVideo = document.getElementById("brollVideo");
+  var canvasBox = document.getElementById("canvasBox");
   var jointAudio = new Audio();
   var tlInner = document.getElementById("tlInner");
   var trackMain = document.getElementById("trackMain");
@@ -270,11 +295,11 @@
   function isCut(id){ if(uncut.has(id)) return false; if(extraCut.has(id)) return true; return baseCut.has(id); }
   function setCut(id,cut){ extraCut.delete(id); uncut.delete(id); if(cut){ if(!baseCut.has(id)) extraCut.add(id);} else { if(baseCut.has(id)) uncut.add(id);} }
 
-  function snapshot(){ return JSON.stringify({ extraCut:[...extraCut], uncut:[...uncut], broll:broll, clips:clips.map(packClip) }); }
+  function snapshot(){ return JSON.stringify({ extraCut:[...extraCut], uncut:[...uncut], broll:broll, clips:clips.map(packClip), brollSyncOff:[...brollSyncOff] }); }
   function packClip(c){ return { id:c.id, baseId:c.baseId, segIdx:c.segIdx, inS:c.inS, outS:c.outS, segIn:c.segIn, segOut:c.segOut, label:c.label, fail:c.fail, gain:c.gain||0, seamLeft:!!c.seamLeft }; }
   function unpackClip(o){ return { id:o.id, baseId:o.baseId, segIdx:o.segIdx, inS:o.inS, outS:o.outS, segIn:o.segIn, segOut:o.segOut, label:o.label, fail:o.fail, gain:o.gain||0, seamLeft:!!o.seamLeft, hasLeft:true, hasRight:true }; }
   function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>120) undoStack.shift(); }
-  function restore(snap){ var o=JSON.parse(snap); extraCut=new Set(o.extraCut); uncut=new Set(o.uncut); broll=o.broll||[]; clips=(o.clips||[]).map(unpackClip); selectedIds=new Set(); selectedBroll=null; }
+  function restore(snap){ var o=JSON.parse(snap); extraCut=new Set(o.extraCut); uncut=new Set(o.uncut); broll=o.broll||[]; clips=(o.clips||[]).map(unpackClip); brollSyncOff=new Set(o.brollSyncOff||[]); selectedIds=new Set(); selectedBroll=null; }
   function markDirty(){ dirty=true; setSaveState("dirty","ungespeichert"); }
   function setSaveState(cls,text){ var el=document.getElementById("saveState"); el.className="save-state "+cls; el.textContent=text; }
   function setRenderState(cls,text){ var el=document.getElementById("renderState"); el.className="save-state "+cls; el.textContent=text; }
@@ -369,6 +394,49 @@
       var hr=document.createElement("div"); hr.className="handle r"; hr.setAttribute("data-bedge","end"); el.appendChild(hr);
       trackBroll.appendChild(el);
     });
+    renderSyncClips();
+  }
+
+  // ---------- Sync-B-Roll (parallel aufgenommenes Screen-Recording) ----------
+  // Die Spur-Clips werden LIVE aus den Haupt-Clips berechnet (Quellzeit-Mapping
+  // via src_offset). Trimmen/Loeschen/Splitten der Haupt-Clips zieht das B-Roll
+  // automatisch mit — exakt wie der Render (broll_sync_pass.py) es macht.
+  function syncPieces(){
+    if(!brollSync) return [];
+    var off=brollSync.src_offset, end=off+brollSync.duration, out=[];
+    clips.forEach(function(c){
+      var a=Math.max(c.inS,off), b=Math.min(c.outS,end);
+      if(b-a>0.04) out.push({ tlStart:c.pStart+(a-c.inS), tlEnd:c.pStart+(b-c.inS),
+                              clip:c, off:brollSyncOff.has(c.id) });
+    });
+    return out;
+  }
+  function renderSyncClips(){
+    trackBroll.querySelectorAll(".sync-clip").forEach(function(e){e.remove();});
+    if(!brollSync) return;
+    syncPieces().forEach(function(pc){
+      var el=document.createElement("div");
+      el.className="clip sync-clip"+(pc.off?" off":"")+(selectedIds.has(pc.clip.id)?" selected":"");
+      el.setAttribute("data-sync-cid", pc.clip.id);
+      el.title="Sync-B-Roll (folgt dem Hauptclip) — Klick: Clip auswählen, Overlay im Inspector schaltbar";
+      var lbl=document.createElement("div"); lbl.className="clip-label";
+      lbl.textContent=(pc.off?"⊘ ":"⛓ ")+(brollSync.name||"B-Roll");
+      el.appendChild(lbl);
+      trackBroll.appendChild(el);
+    });
+  }
+  function positionSyncClips(){
+    if(!brollSync) return;
+    var sp=syncPieces();
+    var els=trackBroll.querySelectorAll(".sync-clip");
+    if(els.length!==sp.length){ renderSyncClips(); els=trackBroll.querySelectorAll(".sync-clip"); }
+    els.forEach(function(el,i){ var pc=sp[i]; if(!pc) return;
+      el.style.left=(pc.tlStart*pxPerSec)+"px";
+      el.style.width=Math.max(4,(pc.tlEnd-pc.tlStart)*pxPerSec)+"px";
+      el.classList.toggle("off", pc.off);
+      el.classList.toggle("selected", selectedIds.has(pc.clip.id));
+      el.setAttribute("data-sync-cid", pc.clip.id);
+    });
   }
 
   function positionClips(){
@@ -379,11 +447,12 @@
       el.style.left=(c.pStart*pxPerSec)+"px";
       el.style.width=Math.max(2,c.dur*pxPerSec)+"px";
     });
-    trackBroll.querySelectorAll(".clip").forEach(function(el){
+    trackBroll.querySelectorAll(".clip[data-broll]").forEach(function(el){
       var b=broll[+el.getAttribute("data-broll")]; if(!b) return;
       el.style.left=(b.start*pxPerSec)+"px";
       el.style.width=Math.max(6,(b.end-b.start)*pxPerSec)+"px";
     });
+    positionSyncClips();
     renderRuler();
     updatePlayhead();
   }
@@ -486,6 +555,36 @@
     }
   }
 
+  // ---------- Composite-Preview (Render-Look im Player) ----------
+  // Im Sync-Fenster: B-Roll fullscreen + Hauptvideo als Facecam-Kreis — exakt
+  // wie broll_sync_pass.py rendert. Nur im Source-EDL-Modus (der Proxy hat das
+  // Overlay bereits eingebrannt).
+  function fitCanvasBox(){
+    var wrap=canvasBox&&canvasBox.parentElement; if(!wrap) return;
+    var W=wrap.clientWidth, H=wrap.clientHeight; if(!W||!H) return;
+    var w=Math.min(W, H*16/9);
+    canvasBox.style.width=w+"px"; canvasBox.style.height=(w*9/16)+"px";
+  }
+  function overlayActive(){
+    if(!brollSync || !useSource) return false;
+    var srcT=video.currentTime||0;
+    if(srcT < brollSync.src_offset || srcT > brollSync.src_offset+brollSync.duration) return false;
+    var hit=clipAtProxy(curProxyTime());
+    if(hit && brollSyncOff.has(hit.clip.id)) return false;
+    return true;
+  }
+  function updateOverlayPreview(){
+    if(!brollSync || !canvasBox) return;
+    var act=overlayActive();
+    canvasBox.classList.toggle("pip", act);
+    if(act){
+      var bt=(video.currentTime||0)-brollSync.src_offset;
+      if(Math.abs((brollVideo.currentTime||0)-bt)>0.15){ try{ brollVideo.currentTime=bt; }catch(e){} }
+      if(!video.paused && brollVideo.paused){ brollVideo.play().catch(function(){}); }
+      if(video.paused && !brollVideo.paused){ brollVideo.pause(); }
+    } else if(!brollVideo.paused){ brollVideo.pause(); }
+  }
+
   // ---------- Playhead ----------
   function updatePlayhead(){
     var pt=curProxyTime();
@@ -497,13 +596,15 @@
     edlBoundaryJump();
     if(previewUntilProxy!=null && curProxyTime()>=previewUntilProxy){ video.pause(); previewUntilProxy=null; }
     updatePlayhead();
+    updateOverlayPreview();
     if(!video.paused && !video.ended){ rafId=requestAnimationFrame(playLoop); } else { rafId=null; }
   }
 
   // ---------- Selektion (mehrfach) + Inspector ----------
   function syncSelectionClasses(){
     trackMain.querySelectorAll(".clip").forEach(function(el){ el.classList.toggle("selected", selectedIds.has(el.getAttribute("data-cid"))); });
-    trackBroll.querySelectorAll(".clip").forEach(function(el){ el.classList.toggle("selected", +el.getAttribute("data-broll")===selectedBroll); });
+    trackBroll.querySelectorAll(".clip[data-broll]").forEach(function(el){ el.classList.toggle("selected", +el.getAttribute("data-broll")===selectedBroll); });
+    trackBroll.querySelectorAll(".sync-clip").forEach(function(el){ el.classList.toggle("selected", selectedIds.has(el.getAttribute("data-sync-cid"))); });
   }
   function selectClip(id, additive){
     selectedBroll=null;
@@ -548,12 +649,14 @@
     var c=sel[0];
     var q=qaByJoint[c.segIdx];
     var g=c.gain||0;
+    var inSync = brollSync && (c.outS > brollSync.src_offset) && (c.inS < brollSync.src_offset + brollSync.duration);
     body.innerHTML =
       '<div class="insp-row"><span class="k">Clip</span><span class="v">'+esc(c.label)+'</span></div>'+
       '<div class="insp-row"><span class="k">Segment-ID</span><span class="v">'+esc(c.id)+'</span></div>'+
       '<div class="insp-row"><span class="k">Quelle in/out</span><span class="v">'+c.inS.toFixed(3)+' / '+c.outS.toFixed(3)+'</span></div>'+
       '<div class="insp-row"><span class="k">Dauer</span><span class="v">'+c.dur.toFixed(3)+' s</span></div>'+
       (q?'<div class="insp-row"><span class="k">Naht-QA</span><span class="v">'+(q.pass===false?'FAIL':'ok')+' · '+(q.edge_db!==undefined?q.edge_db+' dB':'')+'</span></div>':'')+
+      (inSync?'<div class="insp-row"><span class="k">Sync-B-Roll</span><span class="v"><label style="cursor:pointer;color:var(--text)"><input id="inspSyncOff" type="checkbox" '+(brollSyncOff.has(c.id)?'':'checked')+'> Overlay an</label></span></div>':'')+
       '<div class="gain-wrap"><label for="inspGain">Audio-Gain</label><div class="row">'+
         '<input id="inspGain" type="range" min="-12" max="12" step="0.5" value="'+g+'" aria-label="Audio-Gain in Dezibel">'+
         '<span class="gain-val" id="inspGainVal">'+(g>0?"+":"")+g+' dB</span></div></div>'+
@@ -569,6 +672,12 @@
     slider.addEventListener("change", function(){ markDirty(); });
     document.getElementById("inspAudio").addEventListener("click", function(){ previewEdge(c, "out"); });
     document.getElementById("inspDelete").addEventListener("click", deleteSelection);
+    var syncCb=document.getElementById("inspSyncOff");
+    if(syncCb){ syncCb.addEventListener("change", function(e){
+      pushUndo();
+      if(e.target.checked) brollSyncOff.delete(c.id); else brollSyncOff.add(c.id);
+      positionSyncClips(); markDirty(); updateOverlayPreview();
+    }); }
   }
   function renderBrollInspector(i){
     var b=broll[i]; var body=document.getElementById("inspBody");
@@ -699,6 +808,7 @@
     var gainline=e.target.closest(".gainline");
     var clipEl=e.target.closest(".clip");
     if(!clipEl) return;
+    if(clipEl.hasAttribute("data-sync-cid")){ selectClip(clipEl.getAttribute("data-sync-cid"), e.shiftKey); return; }
     if(clipEl.hasAttribute("data-broll")){ return onBrollPointerDown(e, clipEl, handle); }
     var i=+clipEl.getAttribute("data-idx"); var c=clips[i]; if(!c) return;
     if(gainline){
@@ -860,7 +970,7 @@
   // Legacy-Felder bleiben fuer Kompatibilitaet/Drawer mit drin.
   function serialize(){ return {
     timeline_clips: clips.map(function(c){ return { id:c.id, in:+c.inS.toFixed(4), out:+c.outS.toFixed(4), gain:+(c.gain||0) }; }),
-    nudges:nudges, gains:gains, broll:broll,
+    nudges:nudges, gains:gains, broll:broll, broll_sync_off:[...brollSyncOff],
     extra_cut_word_ids:[...extraCut], uncut_word_ids:[...uncut],
     deleted_segments:[...deleted], splits:splits }; }
   function save(){
@@ -960,8 +1070,10 @@
     document.getElementById("btnPlay").addEventListener("click", togglePlay);
     video.addEventListener("play", function(){ document.getElementById("btnPlay").textContent="⏸ Pause"; if(!rafId) rafId=requestAnimationFrame(playLoop); });
     video.addEventListener("pause", function(){ document.getElementById("btnPlay").textContent="▶ Play"; });
-    video.addEventListener("timeupdate", function(){ edlBoundaryJump(); updatePlayhead(); });
-    video.addEventListener("seeked", updatePlayhead);
+    video.addEventListener("timeupdate", function(){ edlBoundaryJump(); updatePlayhead(); updateOverlayPreview(); });
+    video.addEventListener("seeked", function(){ updatePlayhead(); updateOverlayPreview(); });
+    video.addEventListener("pause", updateOverlayPreview);
+    window.addEventListener("resize", fitCanvasBox);
 
     trackMain.addEventListener("pointerdown", onClipPointerDown);
     trackBroll.addEventListener("pointerdown", onClipPointerDown);
@@ -1025,6 +1137,11 @@
     document.getElementById("statSummary").textContent=segments.length+" Segmente · "+words.length+" Wörter"+(keep?" · "+Math.round(keep)+"s":"");
     if(state.sourceUrl){ useSource=true; video.src=state.sourceUrl; }
     else { video.src=state.proxyUrl||"/media/proxy.mp4"; }
+    brollSync=state.brollSync||null;
+    brollSyncOff=new Set(o.broll_sync_off||[]);
+    if(brollSync && state.brollUrl && useSource){ brollVideo.src=state.brollUrl; }
+    else { brollSync=null; }
+    fitCanvasBox(); setTimeout(fitCanvasBox, 150);
     // Clips: gespeicherte Timeline hat Vorrang, sonst Erst-Aufbau aus Segmenten
     clips=(o.timeline_clips&&o.timeline_clips.length) ? clipsFromSaved(o.timeline_clips) : freshClips();
     renderTranscript(); renderJoints(); setupEvents(); setupKeyboard();
@@ -1035,9 +1152,14 @@
     setSaveState("saving","Waveform lädt …");
     fetch("/api/peaks").then(function(r){return r.json();}).then(function(p){
       peaksData=p;
-      var mx=0.02;
-      for(var i=0;i<p.peaks.length;i++){ var a=Math.max(Math.abs(p.peaks[i][0]),Math.abs(p.peaks[i][1])); if(a>mx) mx=a; }
-      peakNorm=0.95/mx;   // Display-Normalisierung: lauteste Stelle ≈ volle Wellenhöhe
+      // Display-Norm auf das 99. PERZENTIL statt Maximum: ein einzelner lauter
+      // Transient (Klatscher/Knall) drueckt sonst leise aufgenommene Sprache
+      // in die Unsichtbarkeit (bc2-Lesson: RMS -33 dBFS vs. Peak -8.8 dBFS).
+      var mags=[];
+      for(var i=0;i<p.peaks.length;i++){ mags.push(Math.max(Math.abs(p.peaks[i][0]),Math.abs(p.peaks[i][1]))); }
+      mags.sort(function(a,b){return a-b;});
+      var p99=mags[Math.min(mags.length-1, Math.floor(mags.length*0.99))]||0.02;
+      peakNorm=0.9/Math.max(0.02, p99);   // Transienten clippen in der Anzeige (Draw capt bei 1)
       drawWaveforms(); setSaveState("saved","bereit");
     }).catch(function(){ setSaveState("dirty","Waveform-Fehler"); });
   }

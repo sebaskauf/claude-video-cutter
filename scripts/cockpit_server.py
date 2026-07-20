@@ -99,11 +99,42 @@ def read_overrides():
     ovr.setdefault("nudges", {})
     ovr.setdefault("gains", {})
     ovr.setdefault("broll", [])
+    ovr.setdefault("broll_sync_off", [])   # Clip-IDs ohne Sync-B-Roll-Overlay
     ovr.setdefault("extra_cut_word_ids", [])
     ovr.setdefault("uncut_word_ids", [])
     ovr.setdefault("deleted_segments", [])
     ovr.setdefault("splits", [])
     return ovr
+
+
+_BROLL_SYNC = {"info": None, "mtime": None}
+
+
+def broll_sync_info():
+    """broll_sync.json des Workdirs + B-Roll-Dauer (ffprobe, gecacht)."""
+    path = os.path.join(CFG["workdir"], "broll_sync.json")
+    if not os.path.exists(path):
+        return None
+    mtime = os.path.getmtime(path)
+    if _BROLL_SYNC["info"] is not None and _BROLL_SYNC["mtime"] == mtime:
+        return _BROLL_SYNC["info"]
+    try:
+        cfg = json.load(open(path))
+        f = cfg.get("file")
+        if not f or not os.path.exists(f):
+            return None
+        r = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                            "format=duration", "-of", "csv=p=0", f],
+                           capture_output=True, text=True)
+        dur = float((r.stdout or "0").strip() or 0)
+        info = {"file": f, "name": os.path.basename(f),
+                "src_offset": float(cfg.get("src_offset", 0)), "duration": dur,
+                "pip": cfg.get("pip", {})}
+        _BROLL_SYNC["info"] = info
+        _BROLL_SYNC["mtime"] = mtime
+        return info
+    except Exception:
+        return None
 
 
 def write_overrides_atomic(ovr):
@@ -235,26 +266,6 @@ def _term_fail(msg):
         TERM["alive"] = False
 
 
-def term_start(cols=120, rows=32):
-    if IS_WINDOWS:
-        return _term_start_windows(cols, rows)
-    with TERM["lock"]:
-        if TERM["alive"]:
-            return
-        pid, fd = pty.fork()
-        if pid == 0:
-            # Kind: claude im Login-Shell-Kontext starten (PATH/nvm etc.)
-            os.chdir(os.path.dirname(HERE))
-            os.environ["TERM"] = "xterm-256color"
-            os.execvp("/bin/zsh", ["/bin/zsh", "-lc", "claude --agent %s" % TERM_AGENT])
-        TERM["fd"] = fd
-        TERM["pid"] = pid
-        TERM["buf"] = b""
-        TERM["alive"] = True
-    term_resize(cols, rows)
-    threading.Thread(target=_term_reader, daemon=True).start()
-
-
 def _term_start_windows(cols=120, rows=32):
     with TERM["lock"]:
         if TERM["alive"]:
@@ -301,6 +312,26 @@ def _term_reader_windows():
             subs = list(TERM["subs"])
         for q in subs:
             q.put(data)
+
+
+def term_start(cols=120, rows=32):
+    if IS_WINDOWS:
+        return _term_start_windows(cols, rows)
+    with TERM["lock"]:
+        if TERM["alive"]:
+            return
+        pid, fd = pty.fork()
+        if pid == 0:
+            # Kind: claude im Login-Shell-Kontext starten (PATH/nvm etc.)
+            os.chdir(os.path.dirname(HERE))
+            os.environ["TERM"] = "xterm-256color"
+            os.execvp("/bin/zsh", ["/bin/zsh", "-lc", "claude --agent %s" % TERM_AGENT])
+        TERM["fd"] = fd
+        TERM["pid"] = pid
+        TERM["buf"] = b""
+        TERM["alive"] = True
+    term_resize(cols, rows)
+    threading.Thread(target=_term_reader, daemon=True).start()
 
 
 def _term_reader():
@@ -435,6 +466,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.serve_media(CFG.get("proxy_path"))
             if route == "/media/source.mp4":
                 return self.serve_media(CFG.get("src_video"))
+            if route == "/media/broll.mp4":
+                info = broll_sync_info()
+                return self.serve_media(info["file"] if info else None)
             if route == "/api/term/stream":
                 return self.serve_term_stream()
             if route.startswith("/vendor/"):
@@ -605,6 +639,8 @@ class Handler(BaseHTTPRequestHandler):
             "sourceUrl": ("/media/source.mp4"
                           if CFG.get("src_video") and os.path.exists(CFG["src_video"])
                           else None),
+            "brollSync": broll_sync_info(),
+            "brollUrl": ("/media/broll.mp4" if broll_sync_info() else None),
             "paths": {
                 "workdir": CFG["workdir"],
                 "overrides": CFG["overrides_path"],
@@ -744,6 +780,7 @@ class Handler(BaseHTTPRequestHandler):
             "nudges": incoming.get("nudges", {}) or {},
             "gains": incoming.get("gains", {}) or {},
             "broll": incoming.get("broll", []) or [],
+            "broll_sync_off": incoming.get("broll_sync_off", []) or [],
             "extra_cut_word_ids": incoming.get("extra_cut_word_ids", []) or [],
             "uncut_word_ids": incoming.get("uncut_word_ids", []) or [],
             "deleted_segments": incoming.get("deleted_segments", []) or [],
@@ -866,7 +903,19 @@ def main():
 
     signal.signal(signal.SIGTERM, _on_sigterm)
 
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    # allow_reuse_address: nach "PROJEKT WECHSELN" (Agentic OS killt den alten
+    # Prozess per lsof) haengt der Port kurz im TIME_WAIT — ohne SO_REUSEADDR
+    # scheitert der neue Bind mit "Address already in use" und der CUTTER-Tab
+    # zeigt nur "cockpit.log pruefen". Mit Reuse bindet der Neustart sofort.
+    ThreadingHTTPServer.allow_reuse_address = True
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError as e:
+        # Port noch echt belegt (anderer laufender Cockpit-Prozess) — klare
+        # Ansage statt Traceback, damit der Launcher-Fehler verstaendlich ist.
+        print("[cockpit] FEHLER: Port %d belegt (%s). Laeuft schon ein Cockpit? "
+              "Alten Prozess beenden: lsof -ti :%d | xargs kill" % (port, e, port))
+        sys.exit(3)
     server.daemon_threads = True
     url = "http://127.0.0.1:%d/" % port
     print("[cockpit] laeuft auf %s  (Strg+C zum Beenden)" % url)

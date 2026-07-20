@@ -54,27 +54,50 @@ ist sonst nirgends persistiert):
 }
 ```
 
+Verwende `qa_stage_a.json` als QA-Argument, wenn Repair 0 Kanten geändert hat
+(dann existiert kein verify2/ — Diff prüfen). Das Plugin akzeptiert beide.
 ```bash
+lsof -ti :8766 | xargs kill 2>/dev/null; sleep 1   # NUR EIN Server auf 8766!
 nohup .venv312/bin/python scripts/cockpit_server.py work/<name> \
-  work/<name>/segments_v5_repaired.json work/<name>/verify2/qa_stage_a.json \
+  work/<name>/segments_v5_repaired.json work/<name>/qa_stage_a.json \
   8766 "<VIDEO>" > work/<name>/cockpit.log 2>&1 & disown
 until curl -s -o /dev/null http://127.0.0.1:8766/api/state; do sleep 1; done
 ```
-Port 8766 belegt? → alten Prozess finden (`lsof -ti :8766`) und killen, oder
-Port 8767 nehmen (dann im Link nennen). Das 6. Argument (Quell-Video) ist
-PFLICHT — ohne läuft der Player nicht auf dem Original (EDL-Playback) und der
-Re-Render-Button funktioniert nicht.
-Smoke-Check: `curl -s http://127.0.0.1:8766/api/state | head -c 100` und
-Range-Check `curl -s -o /dev/null -w "%{http_code}" -r 0-1023 http://127.0.0.1:8766/media/source.mp4` → 206.
+Das 6. Argument (Quell-Video) ist PFLICHT — ohne läuft der Player nicht auf dem
+Original (EDL-Playback), der Re-Render-Button und die B-Roll-Composite-Preview
+funktionieren nicht.
+
+**⚠️ Port-8766-Regel (aus Fehler 20.07.):** NIEMALS zwei Server auf 8766. Wenn
+dein User im Agentic OS ein Projekt startet, während dein Test-Server läuft,
+crasht der Plugin-Start ("cockpit.log prüfen"). Nach dem Playwright-Test den
+Server ENTWEDER laufen lassen (das Plugin erkennt ihn) ODER killen — nie beides.
+
+**Smoke-Checks (alle drei, sonst ist die Übergabe unvollständig):**
+```bash
+curl -s http://127.0.0.1:8766/api/state | .venv312/bin/python -c \
+ "import sys,json; d=json.load(sys.stdin); print('brollSync', bool(d.get('brollSync')), '| source', bool(d.get('sourceUrl')))"
+curl -s -o /dev/null -w "source.mp4 range: %{http_code}\n" -r 0-1023 http://127.0.0.1:8766/media/source.mp4  # → 206
+```
+Dann via Playwright (Pflicht bei B-Roll-Videos): navigate → warte 4s → prüfe
+`.sync-clip`-Anzahl > 0 (B-Roll-Spur da), `canvas`-Pixel != leer (Waveform
+sichtbar), Composite-Preview (Player-Zeit in Sync-Fenster setzen → `#canvasBox`
+hat Klasse `pip`). Screenshot ansehen. KEINE Übergabe ohne diese drei Beweise.
 
 ## D4: Übergabe an deinen User (Format einhalten)
-Öffnen: `open work/<name>/proxy.mp4`, `open work/<name>/REVIEW-LISTE.md`,
-`open http://127.0.0.1:8766/`. Dann melden:
+Die Schnitt-Oberfläche ist der **CUTTER-Tab [04] im Agentic OS**, NICHT der
+localhost-Link (dein User arbeitet dort und wechselt per "PROJEKT WECHSELN").
+Der laufende Server (D3) wird vom Plugin automatisch erkannt und im iframe
+gezeigt — dein User muss den CUTTER-Tab nur öffnen/neu laden. Den localhost-Link
+nur als Fallback nennen. Proxy + Review-Liste öffnen: `open work/<name>/proxy.mp4`,
+`open work/<name>/REVIEW-LISTE.md`. Dann melden:
 1. **Zahlen:** Rohlänge → Schnittlänge, Segmente, QA-Bilanz (PASS/Warnungen/Graufälle)
-2. **Beweise:** A/V-Differenz in ms, Stichproben-Ergebnis
+2. **Beweise:** A/V-Differenz in ms, Stichproben-Ergebnis, + bei B-Roll: Sync
+   verifiziert (Playwright-Beweis)
 3. **Entscheidungen die er treffen muss:** Content-Gaps, größte Graufälle
-4. **Sein Workflow:** Proxy schauen → Graufälle aus Liste anhören → im Cockpit
-   nachcutten (W/Q/E, Trim, Gain-Linie, B-Roll-Slots) → "Neu rendern"
+4. **Sein Workflow:** Agentic OS → CUTTER [04] → Proxy schauen → Graufälle aus
+   Liste anhören → im Cockpit nachcutten (W/Q/E, Trim, Gain-Linie; B-Roll-Sync-Spur
+   folgt den Hauptclips beim Trimmen automatisch, Overlay pro Clip im Inspector
+   schaltbar) → "Neu rendern"
 Ehrlich bleiben: Was maschinell verifiziert ist vs. was sein Ohr braucht.
 
 ## D5: Final-Render (erst NACH Review + Freigabe durch deinen User)
@@ -88,13 +111,24 @@ nohup caffeinate -i .venv312/bin/python scripts/rerender.py work/<name> "<VIDEO>
 ```
 Danach dieselbe Verifikation wie D1.
 
-## B-Roll (separates Thema, nur Schnittstelle)
-- B-Roll-SLOTS (wo, wie lang) setzt dein User im Cockpit oder du auf Zuruf
-  (broll-Feld in cockpit_overrides.json: start/end in Proxy-Sekunden + Dateipfad)
-- B-Roll-ERSTELLUNG ist NICHT dein Job → dafür existiert der
-  `broll-ersteller`-Agent bzw. der Skill `video-effekte` (Grafiken).
-- Beim Render legt rerender.py B-Roll als Video-Overlay über die Slots
-  (Original-Ton bleibt).
+## B-Roll — zwei Modi
+**1. Manuelle SLOTS** (dein User setzt sie im Cockpit, +B-Roll-Button): start/end
+in Proxy-Sekunden + Dateipfad im `broll`-Feld. Video-Overlay über die Slots,
+Original-Ton bleibt.
+
+**2. SYNC-B-Roll** (parallel aufgenommenes Screen-Recording, siehe Agent-Memory
+`broll_parallel_sync`): dein User nennt Sync-Punkt als MM:SS:FF @ Video-fps.
+- Config `work/<name>/broll_sync.json` (file, src_offset in s, pip{}). VOR dem
+  Cockpit-Start schreiben, damit die Sync-Spur + Composite-Preview erscheinen.
+- Sync-Punkt IMMER verifizieren: Duration-Math (offset+broll_dur ≈ Video-Ende)
+  + 2 Content-Checkpoints (B-Roll-Frame bei raw_t−offset gegen Transkript).
+- `broll_sync_pass.py` spiegelt die Cuts aufs B-Roll (Screen bleibt synchron zur
+  Narration) + Facecam-Kreis mit Shadow. Läuft am Ende von `rerender.py` bei
+  JEDEM Render mit — Cockpit-Re-Renders behalten es, respektieren `broll_sync_off`.
+- Im Cockpit: goldene ⛓-Sync-Spur folgt den Hauptclips beim Trimmen; Player zeigt
+  Composite-Preview; Inspector schaltet Overlay pro Clip.
+
+B-Roll-ERSTELLUNG ist NICHT dein Job → `broll-ersteller`-Agent / Skill `video-effekte`.
 
 ## Windows-Hinweise (Claude Code läuft dort mit Git Bash)
 
