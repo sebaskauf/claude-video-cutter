@@ -59,15 +59,18 @@ seine Videoproduktion und hat davon rund $45 verbraucht.
 
 ```
 Klone das Repo https://github.com/sebaskauf/claude-video-cutter und lies
-zuerst die INSTALL.md. Richte den Video-Cutter danach komplett bei mir ein:
-Prüfe alle Voraussetzungen (macOS, ffmpeg, Python), baue die
-Python-Umgebung und installiere den Agent und die Skills in mein
-Claude-Setup. Führe mich danach Schritt für Schritt durch die
-AssemblyAI-Einrichtung: Such mir den aktuellen Link zur kostenlosen
-Registrierung raus, zeig mir, wo ich meinen API-Key finde, und trage ihn
-für mich ein. Erkläre mir jeden Schritt kurz, bevor du ihn ausführst. Am
-Ende zeigst du mir, wie ich mein erstes Video schneide und das Cut-Cockpit
-im Browser öffne.
+zuerst die INSTALL.md — sie ist an dich adressiert. Analysiere davor kurz
+mein bestehendes Claude-Code-Setup (~/.claude: welche Agents und Skills
+ich schon habe, ob es Namens-Kollisionen mit video-cutter oder
+video-cut-* gibt) und passe die Installation optimal daran an. Richte
+dann alles komplett ein: Voraussetzungen prüfen (ffmpeg, Python 3.12 —
+Fehlendes mit mir zusammen installieren), Python-Umgebung bauen, Agent +
+Skills global installieren, und führe mich Schritt für Schritt durch die
+kostenlose AssemblyAI-Einrichtung: Such mir die aktuellen Links, zeig
+mir, wo mein API-Key liegt, und trag ihn sicher in die .env ein. Erkläre
+mir jeden Schritt kurz, bevor du ihn ausführst, und frag nach, bevor du
+etwas überschreibst. Am Ende zeigst du mir, wie ich mein erstes Video
+schneide und das Cut-Cockpit im Browser auf 127.0.0.1:8766 öffne.
 ```
 
 **Du nutzt das [Agentic OS Obsidian-Plugin](https://github.com/sebaskauf/agentic-os)?**
@@ -76,13 +79,18 @@ direkt in deinem Agentic OS ein:
 
 ```
 Klone das Repo https://github.com/sebaskauf/claude-video-cutter und lies
-zuerst die INSTALL.md und die INSTALL-AGENTIC-OS.md. Richte den
-Video-Cutter komplett bei mir ein — inklusive der AssemblyAI-Einrichtung
-mit aktuellen Links, wie in der INSTALL.md beschrieben. Ich nutze außerdem
-das Agentic OS Obsidian-Plugin: Analysiere meine installierte Version,
-aktualisiere sie auf die neueste Version mit dem CUTTER-Tab und binde das
-Cut-Cockpit als eigenen Tab in mein Agentic OS ein. Erkläre mir jeden
-Schritt kurz, bevor du ihn ausführst.
+zuerst die INSTALL.md und die INSTALL-AGENTIC-OS.md — beide sind an dich
+adressiert. Analysiere davor kurz mein bestehendes Claude-Code-Setup
+(~/.claude: vorhandene Agents/Skills, mögliche Namens-Kollisionen) UND
+meine Agentic-OS-Installation: Finde den Obsidian-Vault mit dem Plugin
+(.obsidian/plugins/agentic-os), lies die manifest.json und prüfe die
+Version. Richte dann alles komplett ein: Voraussetzungen, Python-Umgebung,
+Agent + Skills global, kostenlose AssemblyAI-Einrichtung mit aktuellen
+Links — und aktualisiere mein Agentic OS auf die neueste Version mit dem
+CUTTER-Tab (Backup der alten Plugin-Dateien anlegen!) und hinterlege den
+Cutter-Pfad, sodass das Cut-Cockpit als eigener Tab in meinem Agentic OS
+läuft. Erkläre mir jeden Schritt kurz, bevor du ihn ausführst, und frag
+nach, bevor du etwas überschreibst.
 ```
 
 ## Benutzung
