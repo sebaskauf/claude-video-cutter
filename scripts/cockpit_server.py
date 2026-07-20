@@ -9,19 +9,29 @@ Cut-Entscheidungen + QA-Report und schreibt Nach-Cut-Overrides atomar zurueck.
 Nur Python-Stdlib + numpy/soundfile.
 """
 import base64
-import fcntl
 import json
 import os
-import pty
 import queue
 import re
+import shutil
 import signal
 import struct
 import subprocess
 import sys
-import termios
 import threading
 import time
+
+IS_WINDOWS = os.name == "nt"
+if not IS_WINDOWS:
+    import fcntl
+    import pty
+    import termios
+else:
+    # Windows: ConPTY via pywinpty (steht in requirements.txt, nur win32)
+    try:
+        import winpty  # type: ignore
+    except ImportError:  # pragma: no cover
+        winpty = None
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -208,6 +218,7 @@ def compute_peaks():
 TERM = {
     "fd": None,
     "pid": None,
+    "wproc": None,  # Windows: winpty.PtyProcess
     "buf": b"",
     "subs": [],
     "lock": threading.Lock(),
@@ -217,7 +228,16 @@ TERM_BUF_MAX = 400_000
 TERM_AGENT = "video-cutter"
 
 
+def _term_fail(msg):
+    """Fehlermeldung als Terminal-Output anzeigen statt still zu sterben."""
+    with TERM["lock"]:
+        TERM["buf"] = ("\r\n" + msg + "\r\n").encode("utf-8")
+        TERM["alive"] = False
+
+
 def term_start(cols=120, rows=32):
+    if IS_WINDOWS:
+        return _term_start_windows(cols, rows)
     with TERM["lock"]:
         if TERM["alive"]:
             return
@@ -233,6 +253,54 @@ def term_start(cols=120, rows=32):
         TERM["alive"] = True
     term_resize(cols, rows)
     threading.Thread(target=_term_reader, daemon=True).start()
+
+
+def _term_start_windows(cols=120, rows=32):
+    with TERM["lock"]:
+        if TERM["alive"]:
+            return
+        if winpty is None:
+            return _term_fail("pywinpty fehlt - bitte installieren: .venv312/Scripts/pip install pywinpty")
+        exe = shutil.which("claude")
+        if exe is None:
+            return _term_fail("claude nicht im PATH gefunden - ist Claude Code installiert?")
+        env = dict(os.environ)
+        env["TERM"] = "xterm-256color"
+        try:
+            proc = winpty.PtyProcess.spawn(
+                [exe, "--agent", TERM_AGENT],
+                cwd=os.path.dirname(HERE),
+                env=env,
+                dimensions=(int(rows), int(cols)),
+            )
+        except Exception as e:  # noqa: BLE001
+            return _term_fail("Claude-Start fehlgeschlagen: %s" % e)
+        TERM["wproc"] = proc
+        TERM["buf"] = b""
+        TERM["alive"] = True
+    threading.Thread(target=_term_reader_windows, daemon=True).start()
+
+
+def _term_reader_windows():
+    proc = TERM["wproc"]
+    while True:
+        try:
+            chunk = proc.read(65536)  # str (ConPTY liefert Text)
+            data = chunk.encode("utf-8", "replace") if chunk else b""
+        except (EOFError, ConnectionAbortedError, OSError):
+            data = b""
+        if not data:
+            with TERM["lock"]:
+                TERM["alive"] = False
+                subs = list(TERM["subs"])
+            for q in subs:
+                q.put(None)
+            return
+        with TERM["lock"]:
+            TERM["buf"] = (TERM["buf"] + data)[-TERM_BUF_MAX:]
+            subs = list(TERM["subs"])
+        for q in subs:
+            q.put(data)
 
 
 def _term_reader():
@@ -261,6 +329,14 @@ def _term_reader():
 
 
 def term_resize(cols, rows):
+    if IS_WINDOWS:
+        proc = TERM["wproc"]
+        if proc is not None and TERM["alive"]:
+            try:
+                proc.setwinsize(int(rows), int(cols))
+            except Exception:  # noqa: BLE001
+                pass
+        return
     if TERM["fd"] is None:
         return
     try:
@@ -270,6 +346,15 @@ def term_resize(cols, rows):
 
 
 def term_write(data):
+    if IS_WINDOWS:
+        proc = TERM["wproc"]
+        if proc is None or not TERM["alive"]:
+            return False
+        try:
+            proc.write(data.decode("utf-8", "replace"))
+            return True
+        except Exception:  # noqa: BLE001
+            return False
     if TERM["fd"] is None or not TERM["alive"]:
         return False
     try:
@@ -282,7 +367,15 @@ def term_write(data):
 def term_kill():
     with TERM["lock"]:
         pid = TERM["pid"]
+        wproc = TERM["wproc"]
         TERM["alive"] = False
+    if IS_WINDOWS:
+        if wproc is not None:
+            try:
+                wproc.terminate(force=True)
+            except Exception:  # noqa: BLE001
+                pass
+        return
     if pid:
         try:
             os.kill(pid, signal.SIGTERM)

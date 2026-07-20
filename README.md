@@ -35,10 +35,12 @@ verspricht dir hier niemand.
 
 ## Voraussetzungen
 
-- **macOS** (dort entwickelt und getestet; Windows/Linux ungetestet)
+- **macOS** (dort entwickelt und getestet) **oder Windows** (voll
+  eingebaut inkl. Terminal im Cockpit via ConPTY — frisch portiert, von
+  Windows-Usern zu verifizieren; Feedback willkommen)
 - **Claude Code** (Abo, [claude.com/claude-code](https://claude.com/claude-code))
-- **ffmpeg** (`brew install ffmpeg`)
-- **Python 3.12** (`brew install python@3.12` oder [uv](https://docs.astral.sh/uv/))
+- **ffmpeg** (macOS: `brew install ffmpeg` · Windows: `winget install ffmpeg`)
+- **Python 3.12** (macOS: `brew install python@3.12` · Windows: `winget install Python.Python.3.12`)
 - **AssemblyAI-Account** (kostenlos, siehe Kosten)
 
 ## Kosten
@@ -124,7 +126,9 @@ scripts/cockpit/               Das Cut-Cockpit (Browser-UI, self-contained)
 ## Grenzen (ehrlich)
 
 - Optimiert für **deutsche** Talking-Head-/Tutorial-Videos
-- **macOS-first** — auf Windows/Linux ungetestet
+- **macOS-first** — der Windows-Pfad (inkl. ConPTY-Terminal, Software-Encoding
+  beim Final-Render) ist komplett eingebaut, aber noch nicht auf echter
+  Windows-Hardware verifiziert. Linux ungetestet
 - Semantische Dopplungen ("dasselbe anders formuliert") findet kein System
   der Welt zu 100% — dafür gibt es die Review-Liste und das Cockpit
 - Der Agent braucht Claude Code mit einem Modell auf Opus-Niveau für die

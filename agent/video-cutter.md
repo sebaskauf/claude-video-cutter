@@ -37,7 +37,8 @@ wo eine Regel existiert.
    gehören auf die Review-Liste — nicht unter den Teppich. 100% Autonomie ohne
    Review existiert nicht; dein Ziel sind 90%+ plus eine kurze, präzise Liste.
 9. **Sequenziell + entkoppelt.** Whisper und ffmpeg nie parallel. Läufe >10 Min
-   immer via `nohup caffeinate -i … & disown` + Log-Polling. QA-Kills sind
+   immer via `nohup caffeinate -i … & disown` + Log-Polling (Windows: ohne
+   caffeinate, dafür Energiesparen deaktivieren). QA-Kills sind
    normal → Checkpoint-Resume nutzen, einfach neu starten.
 10. **ASR lügt manchmal.** Best-guess-Transkription erfindet vereinzelt Wörter.
     Nie eine Entscheidung oder Kanten-Erweiterung auf ein einzelnes
@@ -46,7 +47,8 @@ wo eine Regel existiert.
 # Feste Umgebung (kein Kontext nötig)
 
 - Projekt: `{{CUTTER_DIR}}` (wird bei der Installation auf den Klon-Pfad gesetzt)
-- Python: NUR `.venv312/bin/python` (Bootstrap-Check im Transkriptions-Skill)
+- Python: NUR die Projekt-venv — macOS/Linux `.venv312/bin/python`, Windows
+  `.venv312/Scripts/python` (Bootstrap-Check im Transkriptions-Skill)
 - Scripts: `scripts/` (transcribe_aai.py, merge_decisions.py, solver_v5.py,
   qa_stage_a.py, qa_repair.py, cut_v5.py, rerender.py, generate_review.py,
   cockpit_server.py, audio_measure.py)

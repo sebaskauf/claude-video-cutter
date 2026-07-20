@@ -95,3 +95,13 @@ Danach dieselbe Verifikation wie D1.
   `broll-ersteller`-Agent bzw. der Skill `video-effekte` (Grafiken).
 - Beim Render legt rerender.py B-Roll als Video-Overlay über die Slots
   (Original-Ton bleibt).
+
+## Windows-Hinweise (Claude Code läuft dort mit Git Bash)
+
+- Python-Pfad: überall `.venv312/Scripts/python` statt `.venv312/bin/python`
+- `caffeinate` gibt es nicht — weglassen und stattdessen den Energiesparmodus
+  deaktivieren (Einstellungen → Energie), `nohup … & disown` funktioniert in
+  Git Bash normal
+- Port prüfen/freimachen: statt `lsof -ti :8766` →
+  `netstat -ano | findstr :8766`, dann `taskkill //PID <pid> //F`
+- ffmpeg installieren: `winget install ffmpeg` · Python 3.12: `winget install Python.Python.3.12`

@@ -154,7 +154,9 @@ def render_segments(segs, src, out_mp4, mode, broll, workdir):
         venc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
     else:
         vf_extra = ""
-        venc = ["-c:v", "hevc_videotoolbox", "-q:v", "55", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
+        venc = (["-c:v", "hevc_videotoolbox", "-q:v", "55", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
+                if sys.platform == "darwin"
+                else ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p"])
 
     pairs = [(s["in"], s["out"], s.get("gain_db", 0.0)) for s in segs if s["out"] > s["in"]]
     print(f"[rerender] Render {len(pairs)} Segmente, mode={mode}", flush=True)

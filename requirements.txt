@@ -4,3 +4,6 @@ soundfile==0.14.0
 requests==2.34.2
 rapidfuzz==3.14.5
 faster-whisper==1.2.1
+
+# Windows-Terminal (ConPTY) — nur auf Windows installiert
+pywinpty>=2.0; sys_platform == "win32"

@@ -82,3 +82,13 @@ Atmer — QA-Re-Verify entscheidet.)
 - [ ] Graufälle-Anteil <15% der Nähte (sonst zurück zu Phase B)
 
 Weiter mit Skill `video-cut-uebergabe`.
+
+## Windows-Hinweise (Claude Code läuft dort mit Git Bash)
+
+- Python-Pfad: überall `.venv312/Scripts/python` statt `.venv312/bin/python`
+- `caffeinate` gibt es nicht — weglassen und stattdessen den Energiesparmodus
+  deaktivieren (Einstellungen → Energie), `nohup … & disown` funktioniert in
+  Git Bash normal
+- Port prüfen/freimachen: statt `lsof -ti :8766` →
+  `netstat -ano | findstr :8766`, dann `taskkill //PID <pid> //F`
+- ffmpeg installieren: `winget install ffmpeg` · Python 3.12: `winget install Python.Python.3.12`

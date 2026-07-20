@@ -31,7 +31,9 @@ def main():
         venc = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p"]
     else:
         vf_extra = ""
-        venc = ["-c:v", "hevc_videotoolbox", "-q:v", "55", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
+        venc = (["-c:v", "hevc_videotoolbox", "-q:v", "55", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"]
+                if sys.platform == "darwin"
+                else ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p"])
 
     keep = sum(e - s for s, e in segs)
     print(f"[cutv5] {len(segs)} Segmente, {keep:.0f}s, mode={mode}", flush=True)

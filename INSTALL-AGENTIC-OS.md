@@ -56,7 +56,7 @@ cat ~/.claude-video-cutter-path
 
 ## Hinweise
 
-- Der CUTTER-Tab ist aktuell **macOS-only** (nutzt macOS-Prozess-Tools).
-  Windows-User nutzen den Browser-Weg — gleiches Cockpit, gleiche Features.
+- Der CUTTER-Tab läuft auf **macOS und Windows** (ab Agentic OS v0.2.1;
+  v0.2.0 war macOS-only — dann einfach auf das neueste Release updaten).
 - Cockpit und OS-Tab zeigen dieselbe URL (`127.0.0.1:8766`) — beides
   gleichzeitig offen ist okay.

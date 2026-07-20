@@ -9,27 +9,42 @@
 ## Schritt 1: Voraussetzungen prüfen
 
 ```bash
-uname -s                 # Darwin = macOS (alles andere: warnen, ungetestet!)
+uname -s                 # Darwin = macOS, MINGW/MSYS = Windows mit Git Bash
 ffmpeg -version | head -1
 ffprobe -version | head -1
-python3.12 --version || echo "PYTHON 3.12 FEHLT"
+python3.12 --version || py -3.12 --version || echo "PYTHON 3.12 FEHLT"
 ```
 
-- Kein macOS → deinem User ehrlich sagen: Der Cutter ist auf macOS gebaut
-  und auf anderen Systemen ungetestet. Nur fortfahren, wenn er das
-  ausdrücklich will.
-- ffmpeg fehlt → `brew install ffmpeg` (nachfragen, bevor du installierst).
-- Python 3.12 fehlt → `brew install python@3.12` oder via uv (nachfragen).
+- **macOS:** ffmpeg fehlt → `brew install ffmpeg` · Python 3.12 fehlt →
+  `brew install python@3.12` oder via uv (immer nachfragen, bevor du
+  installierst).
+- **Windows (Git Bash):** ffmpeg fehlt → `winget install ffmpeg` ·
+  Python 3.12 fehlt → `winget install Python.Python.3.12`. Danach neues
+  Terminal (PATH). Sag deinem User dazu: Der Cutter wurde auf macOS gebaut,
+  der Windows-Support ist frisch — bei Auffälligkeiten bitte in der
+  Community melden.
+- **Linux:** ungetestet, ehrlich sagen und nur auf ausdrücklichen Wunsch
+  fortfahren.
 
 ## Schritt 2: Python-Umgebung bauen
 
 Aus dem Verzeichnis dieses Repos:
 
 ```bash
+# macOS/Linux:
 uv venv --python 3.12 .venv312 2>/dev/null || python3.12 -m venv .venv312
 VIRTUAL_ENV=$PWD/.venv312 uv pip install -r requirements.txt 2>/dev/null || .venv312/bin/pip install -r requirements.txt
 .venv312/bin/python -c "import numpy, soundfile, faster_whisper, requests, rapidfuzz; print('Umgebung OK')"
+
+# Windows (Git Bash) — venv-Binaries liegen unter Scripts/ statt bin/:
+py -3.12 -m venv .venv312 || python -m venv .venv312
+.venv312/Scripts/pip install -r requirements.txt
+.venv312/Scripts/python -c "import numpy, soundfile, faster_whisper, requests, rapidfuzz, winpty; print('Umgebung OK')"
 ```
+
+Merke dir die Plattform: In allen Skills und Kommandos gilt auf Windows
+`.venv312/Scripts/python` statt `.venv312/bin/python` (steht auch in den
+Windows-Hinweisen der Skills).
 
 Hinweis für deinen User: Beim allerersten QA-Lauf lädt faster-whisper das
 large-v3-Modell (~3 GB) einmalig herunter — das ist normal.

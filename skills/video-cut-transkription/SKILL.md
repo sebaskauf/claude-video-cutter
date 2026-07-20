@@ -12,7 +12,8 @@ unsichtbar und können nicht geschnitten werden — deshalb ist diese Phase heil
 
 ## Feste Pfade
 - Projekt: `{{CUTTER_DIR}}`
-- Python: IMMER `.venv312/bin/python` (relativ zum Projekt). Kein System-Python.
+- Python: IMMER die Projekt-venv (macOS/Linux `.venv312/bin/python`, Windows
+  `.venv312/Scripts/python`). Kein System-Python.
 - AAI-Key: liegt in `{{CUTTER_DIR}}/.env` als `AAI_KEY`. Laden: `set -a; . ./.env; set +a`
 - Workdir pro Video: `work/<kurzname>/` (kurzname = klein, ohne Leerzeichen, z.B. `v7`)
 
@@ -110,3 +111,13 @@ EOF
 - [ ] Stille-Anteil notiert (viel Stille = Screen-Demo-Video, siehe Entscheidungs-Skill)
 
 Weiter mit Skill `video-cut-entscheidung`.
+
+## Windows-Hinweise (Claude Code läuft dort mit Git Bash)
+
+- Python-Pfad: überall `.venv312/Scripts/python` statt `.venv312/bin/python`
+- `caffeinate` gibt es nicht — weglassen und stattdessen den Energiesparmodus
+  deaktivieren (Einstellungen → Energie), `nohup … & disown` funktioniert in
+  Git Bash normal
+- Port prüfen/freimachen: statt `lsof -ti :8766` →
+  `netstat -ano | findstr :8766`, dann `taskkill //PID <pid> //F`
+- ffmpeg installieren: `winget install ffmpeg` · Python 3.12: `winget install Python.Python.3.12`
