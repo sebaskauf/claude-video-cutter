@@ -1,0 +1,1122 @@
+<title>Cut-Cockpit — Timeline</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/addon-fit.js"></script>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #16181f; --panel-2: #1b1e27; --panel-3: #21252f;
+    --border: #262a35; --border-strong: #333949;
+    --text: #e5e7eb; --muted: #9aa3b2; --muted-2: #6b7280;
+    --accent: #f97316; --accent-dim: #7c3a12;
+    --cut: #ef4444; --pass: #22c55e; --warn: #eab308; --focus: #60a5fa;
+    --clip-a: #2b3346; --clip-b: #313a4f; --clip-sel: #f97316;
+    --broll: #2f5140; --wave: #6b9bd1;
+    --track-h: 84px; --broll-h: 44px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+  button {
+    font: inherit; color: inherit; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--border-strong);
+    border-radius: 6px; padding: 6px 10px;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  button:hover { background: #232733; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a0f05; font-weight: 600; }
+  button.primary:hover { background: #fb8b3d; }
+  button.ghost { background: transparent; }
+  button.danger { border-color: #7f1d1d; color: #fca5a5; }
+  button.danger:hover { background: #3b1414; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  input, select { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: 6px; padding: 5px 8px; }
+  input[type="range"] { padding: 0; accent-color: var(--accent); }
+  label { color: var(--muted); font-size: 12px; }
+  .save-state { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--muted); white-space: nowrap; }
+  .save-state:empty { display: none; }
+  .save-state.dirty { color: var(--warn); border-color: var(--warn); }
+  .save-state.saved { color: var(--pass); border-color: var(--pass); }
+  .save-state.saving { color: var(--accent); border-color: var(--accent); }
+
+  .app { display: grid; grid-template-rows: auto minmax(0,1fr) 40vh; grid-template-columns: minmax(0, 1fr); width: 100vw; max-width: 100vw; height: 100vh; overflow: hidden; }
+
+  /* Toolbar */
+  header.bar { display: flex; align-items: center; gap: 12px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header.bar h1 { font-size: 15px; margin: 0; font-weight: 700; }
+  header.bar .stat { font-size: 12px; color: var(--muted); }
+  header.bar .spacer { flex: 1; }
+
+  /* Stage: preview + inspector */
+  .stage { display: grid; grid-template-columns: minmax(0,1fr) 440px; gap: 12px; padding: 12px; min-height: 0; min-width: 0; }
+  .preview { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .video-wrap { background: #000; border-radius: 8px; flex: 1 1 auto; display: flex; align-items: center; justify-content: center; min-height: 0; overflow: hidden; }
+  video { max-width: 100%; max-height: 100%; display: block; background: #000; }
+  .transport { display: flex; align-items: center; gap: 10px; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+
+  .inspector { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+  .side-tabs { display: flex; gap: 4px; margin: 0 0 8px; flex: 0 0 auto; }
+  .side-tab { flex: 1; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .6px; padding: 5px 0; border-radius: 6px; cursor: pointer; }
+  .side-tab.active { color: var(--text); border-color: var(--border-strong); background: var(--panel-3); }
+  .side-tab .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-left: 5px; vertical-align: middle; }
+  .claude-pane { position: relative; flex: 1; min-height: 0; background: #0a0a0d; border-radius: 6px; overflow: hidden; }
+  #claudeTermHost { position: absolute; inset: 6px; }
+  .claude-exit { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgba(10,10,13,.92); z-index: 5; }
+  .claude-exit button { background: var(--panel-3); border: 1px solid var(--border-strong); color: var(--text); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+  #inspectorPane { overflow: auto; min-height: 0; flex: 1; }
+  .inspector h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; }
+  .insp-row { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; font-size: 13px; }
+  .insp-row .k { color: var(--muted); }
+  .insp-row .v { font-variant-numeric: tabular-nums; }
+  .insp-empty { color: var(--muted-2); font-size: 13px; }
+  .gain-wrap { margin: 12px 0; }
+  .gain-wrap .row { display: flex; align-items: center; gap: 8px; }
+  .gain-wrap input[type=range] { flex: 1; }
+  .gain-val { font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; font-size: 12px; }
+
+  /* Timeline */
+  .timeline-wrap { background: var(--panel); border-top: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .tl-toolbar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+  .tl-toolbar .zoomwrap { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  .tl-toolbar input[type=range] { width: 160px; }
+  .tl-scroll { overflow-x: auto; overflow-y: hidden; flex: 1 1 auto; position: relative; min-width: 0; }
+  .tl-inner { position: relative; height: 100%; min-width: 100%; }
+  .ruler { position: relative; height: 22px; border-bottom: 1px solid var(--border); background: var(--panel-2); }
+  .ruler .tick { position: absolute; top: 0; height: 100%; border-left: 1px solid var(--border-strong); padding-left: 4px; font-size: 10px; color: var(--muted-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .track { position: relative; }
+  .track.broll { height: var(--broll-h); background: #12140f; border-bottom: 1px solid var(--border); }
+  .track.main { height: var(--track-h); background: #101219; }
+  .track-label { position: sticky; left: 0; z-index: 3; display: inline-block; font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted-2); background: var(--panel); padding: 1px 5px; border-bottom-right-radius: 4px; pointer-events: none; }
+
+  .clip { position: absolute; top: 4px; bottom: 4px; border-radius: 5px; overflow: hidden; cursor: pointer; border: 1px solid rgba(255,255,255,.08); background: var(--clip-a); }
+  .clip.alt { background: var(--clip-b); }
+  .clip.selected { border-color: var(--clip-sel); box-shadow: 0 0 0 1px var(--clip-sel); z-index: 2; }
+  .clip.fail::after { content: ""; position: absolute; top: 0; right: 0; width: 0; height: 0; border-top: 12px solid var(--cut); border-left: 12px solid transparent; }
+  .clip .clip-label { position: absolute; top: 3px; left: 6px; right: 6px; font-size: 11px; color: #cfd6e4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.6); }
+  .clip canvas { position: absolute; left: 0; bottom: 0; width: 100%; height: 60%; display: block; }
+  .clip .handle { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; background: transparent; }
+  .clip .handle:hover, .clip .handle.dragging { background: rgba(249,115,22,.5); }
+  .clip .handle.l { left: 0; } .clip .handle.r { right: 0; }
+  .clip .split-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: repeating-linear-gradient(0deg,#f9731699 0 4px,transparent 4px 8px); pointer-events: none; }
+  .clip .gainline { position: absolute; left: 0; right: 0; height: 3px; margin-top: -1px; background: rgba(255,255,255,.55); cursor: ns-resize; z-index: 2; }
+  .clip .gainline:hover, .clip .gainline.dragging { background: var(--accent); height: 4px; }
+  .clip.broll-clip { background: var(--broll); }
+  .marquee { position: absolute; top: 0; bottom: 0; background: rgba(249,115,22,.12); border: 1px solid rgba(249,115,22,.6); pointer-events: none; z-index: 6; }
+
+  .playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--accent); z-index: 5; pointer-events: none; }
+  .playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--accent); }
+
+  .tl-tooltip { position: fixed; z-index: 50; background: #000; color: #fff; font-size: 11px; font-variant-numeric: tabular-nums; padding: 2px 6px; border-radius: 4px; pointer-events: none; display: none; }
+
+  /* Drawer */
+  .drawer { position: fixed; top: 0; right: 0; width: 460px; max-width: 92vw; height: 100vh; background: var(--panel); border-left: 1px solid var(--border-strong); z-index: 40; transform: translateX(100%); transition: transform 180ms ease; display: flex; flex-direction: column; box-shadow: -8px 0 24px rgba(0,0,0,.4); }
+  .drawer.open { transform: translateX(0); }
+  .drawer .dhead { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid var(--border); }
+  .drawer .dhead h2 { font-size: 14px; margin: 0; }
+  .drawer .dbody { overflow: auto; padding: 12px; flex: 1 1 auto; }
+  .drawer .sub { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted-2); margin: 8px 0 6px; }
+  .transcript { line-height: 2; user-select: none; }
+  .transcript .w { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
+  .transcript .w:hover { background: #2a2f3d; }
+  .transcript .w.cut { color: var(--cut); text-decoration: line-through; opacity: .7; }
+  .jrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+  .jrow .badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; }
+  .jrow .badge.fail { background: rgba(239,68,68,.15); color: #fca5a5; }
+  .jrow .badge.pass { background: rgba(34,197,94,.13); color: #86efac; }
+
+  .legend { font-size: 11px; color: var(--muted-2); }
+  .legend kbd { font: 11px/1 ui-monospace, Menlo, monospace; background: var(--panel-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 4px; color: var(--text); }
+
+  /* Hover-Cut-Linie (folgt der Maus über der Timeline) */
+  .hover-line { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px dashed rgba(255,255,255,.45); z-index: 4; pointer-events: none; display: none; }
+  .hover-line .hl-label { position: absolute; top: 0; left: 3px; font-size: 10px; font-variant-numeric: tabular-nums; background: rgba(0,0,0,.72); color: #fff; padding: 1px 5px; border-radius: 3px; white-space: nowrap; }
+
+  /* Toast (kurzer Hinweis, z.B. bei blockierter Aktion) */
+  .toast { position: fixed; left: 50%; bottom: 46vh; transform: translateX(-50%); background: #000; color: #fff; font-size: 13px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border-strong); z-index: 60; opacity: 0; pointer-events: none; transition: opacity 140ms ease; }
+  .toast.show { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="bar">
+    <h1>Cut-Cockpit</h1>
+    <span class="stat" id="statSummary">lädt …</span>
+    <span class="spacer"></span>
+    <span class="save-state" id="renderState" role="status" aria-live="polite"></span>
+    <span class="save-state" id="saveState" role="status" aria-live="polite">bereit</span>
+    <button id="btnDrawer" class="ghost" aria-label="Text-Ansicht öffnen oder schließen" aria-expanded="false">Text-Ansicht</button>
+    <button id="btnUndo" aria-label="Letzte Änderung rückgängig (Cmd+Z)">↶ Undo</button>
+    <button id="btnSave" class="primary" aria-label="Overrides speichern (Cmd+S)">Speichern</button>
+    <button id="btnRerender" aria-label="Proxy neu rendern" aria-busy="false">Neu rendern</button>
+  </header>
+
+  <div class="stage">
+    <div class="preview">
+      <div class="video-wrap"><video id="video" preload="metadata" playsinline aria-label="Proxy-Vorschau"></video></div>
+      <div class="transport">
+        <button id="btnPlay" aria-label="Abspielen oder pausieren (Leertaste)">▶ Play</button>
+        <span class="time" id="timeLabel">0:00,000 / 0:00</span>
+        <span class="spacer" style="flex:1"></span>
+        <span class="legend"><kbd>Leer</kbd> Play · <kbd>W</kbd> Cut · <kbd>Q</kbd>/<kbd>E</kbd> Cut links/rechts weg · <kbd>⇧</kbd> radikal · <kbd>Doppelklick</kbd> springen · <kbd>Entf</kbd> Löschen · <kbd>+/−</kbd> Zoom</span>
+      </div>
+    </div>
+    <aside class="inspector" id="inspector" aria-label="Claude + Clip-Inspector">
+      <div class="side-tabs">
+        <button class="side-tab active" id="tabClaude" type="button">Claude</button>
+        <button class="side-tab" id="tabInspector" type="button">Inspector<span class="dot" id="inspDot" style="display:none"></span></button>
+      </div>
+      <div class="claude-pane" id="claudePane">
+        <div id="claudeTermHost"></div>
+        <div class="claude-exit" id="claudeExit" style="display:none">
+          <div>Claude-Session beendet.</div>
+          <button id="btnTermRestart" type="button">Neu starten</button>
+        </div>
+      </div>
+      <div id="inspectorPane" style="display:none">
+        <h2>Inspector</h2>
+        <div id="inspBody"><p class="insp-empty">Kein Clip ausgewählt. Klick einen Clip in der Timeline.</p></div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="timeline-wrap">
+    <div class="tl-toolbar">
+      <span>Timeline</span>
+      <button id="btnAddBroll" aria-label="B-Roll-Slot am Playhead hinzufügen">+ B-Roll</button>
+      <span id="tlInfo" class="stat"></span>
+      <div class="zoomwrap">
+        <button id="zoomOut" aria-label="Herauszoomen">−</button>
+        <label for="zoom" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Zoom</label>
+        <input id="zoom" type="range" min="0.5" max="200" step="0.5" value="12" aria-label="Zoom Pixel pro Sekunde">
+        <button id="zoomIn" aria-label="Hineinzoomen">+</button>
+        <span id="zoomLabel" class="time" style="min-width:64px">12 px/s</span>
+      </div>
+    </div>
+    <div class="tl-scroll" id="tlScroll">
+      <div class="tl-inner" id="tlInner">
+        <div class="ruler" id="ruler"></div>
+        <div class="track broll" id="trackBroll"><span class="track-label">B-Roll</span></div>
+        <div class="track main" id="trackMain"><span class="track-label">Segmente</span></div>
+        <div class="hover-line" id="hoverLine"><span class="hl-label" id="hoverLabel"></span></div>
+        <div class="playhead" id="playhead" style="left:0"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="tl-tooltip" id="tooltip"></div>
+
+<div class="drawer" id="drawer" aria-hidden="true">
+  <div class="dhead">
+    <h2>Text-Ansicht</h2>
+    <span class="spacer" style="flex:1"></span>
+    <button id="drawerClose" aria-label="Text-Ansicht schließen">✕</button>
+  </div>
+  <div class="dbody">
+    <div class="sub">Transkript — Klick schneidet ein Wort</div>
+    <div class="transcript" id="transcript"></div>
+    <div class="sub" style="margin-top:16px">Nähte (Fails oben)</div>
+    <div id="jointList"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+(function () {
+  // ---------- State ----------
+  var words = [], segments = [], qa = [], qaByJoint = {};
+  var baseCut = new Set(), extraCut = new Set(), uncut = new Set();
+  var nudges = {}, gains = {}, broll = [];
+  var deleted = new Set();     // first_ids (auch Split-Haelften "wN#sK")
+  var splits = [];             // Source-Sekunden
+  var peaksData = null;        // {sr_eff, peaks, seg_offsets}
+  var wordToSeg = {};
+
+  // clips ist seit v2.3 der PERSISTENTE Editier-Zustand (Quelle der Wahrheit,
+  // wird als timeline_clips gespeichert und 1:1 gerendert). Kein Rebuild aus
+  // splits/deleted/nudges mehr — dadurch sind Split-Hälften voll editierbar.
+  var clips = [];
+  var totalSec = 0;
+  var pxPerSec = 12;
+  var selectedIds = new Set();   // Mehrfach-Auswahl (Shift+Klick / Aufziehen)
+  var selectedBroll = null;      // Index in broll[] des selektierten B-Roll-Clips
+  var hoverTime = null;          // Proxy-Zeit unter der Maus (null wenn Maus nicht über Timeline)
+  var toastTimer = null;
+  var dirty = false;
+  var undoStack = [];
+  var rafId = null;
+  var peakNorm = 1;              // Display-Normalisierung der Waveform (CapCut-Look)
+  var marquee = null;            // aktive Aufzieh-Selektion
+
+  var video = document.getElementById("video");
+  var jointAudio = new Audio();
+  var tlInner = document.getElementById("tlInner");
+  var trackMain = document.getElementById("trackMain");
+  var trackBroll = document.getElementById("trackBroll");
+  var tooltip = document.getElementById("tooltip");
+
+  // ---------- Helpers ----------
+  function fmtTime(s) { if (!isFinite(s)) s = 0; var m = Math.floor(s/60), sec = s - m*60; return m + ":" + (sec<10?"0":"") + sec.toFixed(3).replace(".", ","); }
+  function fmtClock(s) { if (!isFinite(s)) s = 0; var m = Math.floor(s/60), sec = Math.floor(s-m*60); return m + ":" + (sec<10?"0":"") + sec; }
+  function esc(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+  function isCut(id){ if(uncut.has(id)) return false; if(extraCut.has(id)) return true; return baseCut.has(id); }
+  function setCut(id,cut){ extraCut.delete(id); uncut.delete(id); if(cut){ if(!baseCut.has(id)) extraCut.add(id);} else { if(baseCut.has(id)) uncut.add(id);} }
+
+  function snapshot(){ return JSON.stringify({ extraCut:[...extraCut], uncut:[...uncut], broll:broll, clips:clips.map(packClip) }); }
+  function packClip(c){ return { id:c.id, baseId:c.baseId, segIdx:c.segIdx, inS:c.inS, outS:c.outS, segIn:c.segIn, segOut:c.segOut, label:c.label, fail:c.fail, gain:c.gain||0, seamLeft:!!c.seamLeft }; }
+  function unpackClip(o){ return { id:o.id, baseId:o.baseId, segIdx:o.segIdx, inS:o.inS, outS:o.outS, segIn:o.segIn, segOut:o.segOut, label:o.label, fail:o.fail, gain:o.gain||0, seamLeft:!!o.seamLeft, hasLeft:true, hasRight:true }; }
+  function pushUndo(){ undoStack.push(snapshot()); if(undoStack.length>120) undoStack.shift(); }
+  function restore(snap){ var o=JSON.parse(snap); extraCut=new Set(o.extraCut); uncut=new Set(o.uncut); broll=o.broll||[]; clips=(o.clips||[]).map(unpackClip); selectedIds=new Set(); selectedBroll=null; }
+  function markDirty(){ dirty=true; setSaveState("dirty","ungespeichert"); }
+  function setSaveState(cls,text){ var el=document.getElementById("saveState"); el.className="save-state "+cls; el.textContent=text; }
+  function setRenderState(cls,text){ var el=document.getElementById("renderState"); el.className="save-state "+cls; el.textContent=text; }
+
+  // ---------- Clip-Modell ----------
+  // freshClips: Erst-Aufbau aus Segmenten + Legacy-Overrides (Nudges/Splits/
+  // Deletes/Gains aus aelteren Sessions). Danach lebt der Zustand NUR in clips.
+  function freshClips(){
+    var list = [];
+    for (var i=0;i<segments.length;i++){
+      var seg=segments[i];
+      var inN=+(nudges[i+":in"]||0), outN=+(nudges[i+":out"]||0);
+      list.push({ segIdx:i, id:seg.first_id, baseId:seg.first_id,
+        inS:seg.in+inN, outS:seg.out+outN, segIn:seg.in, segOut:seg.out,
+        label:(seg.first_word||"")+" …", hasLeft:true, hasRight:true,
+        gain:+(gains[i]||0), fail:isJointFail(i) });
+    }
+    splits.slice().sort(function(a,b){return a-b;}).forEach(function(t){
+      for (var j=0;j<list.length;j++){
+        var c=list[j];
+        if (c.inS+0.05 < t && t < c.outS-0.05){
+          var right=Object.assign({},c,{ inS:t, id:newSplitIdIn(list,c.baseId), seamLeft:true });
+          var left=Object.assign({},c,{ outS:t });
+          list.splice(j,1,left,right);
+          break;
+        }
+      }
+    });
+    return list.filter(function(c){ return !deleted.has(c.id); });
+  }
+  function clipsFromSaved(tc){
+    var segByFirst={}; segments.forEach(function(s,i){ segByFirst[s.first_id]={seg:s, idx:i}; });
+    return tc.map(function(t){
+      var base=String(t.id).split("#")[0];
+      var m=segByFirst[base];
+      return { id:t.id, baseId:base, segIdx:m?m.idx:-1,
+        inS:+t.in, outS:+t.out, segIn:m?m.seg.in:+t.in, segOut:m?m.seg.out:+t.out,
+        label:(m&&m.seg.first_word?m.seg.first_word:base)+" …", hasLeft:true, hasRight:true,
+        gain:+(t.gain||0), fail:m?isJointFail(m.idx):false, seamLeft:String(t.id).indexOf("#s")>0 };
+    });
+  }
+  function newSplitIdIn(list, base){
+    var k=1; var has=function(id){ return list.some(function(x){return x.id===id;}); };
+    while(has(base+"#s"+k)) k++;
+    return base+"#s"+k;
+  }
+  function isJointFail(segIdx){ var q=qaByJoint[segIdx]; return q && q.pass===false; }
+  function recomputeOffsets(){ var cum=0; clips.forEach(function(c){ c.dur=Math.max(0,c.outS-c.inS); c.pStart=cum; cum+=c.dur; }); totalSec=cum; }
+
+  // ---------- Timeline rendern (aus dem persistenten clips-Zustand) ----------
+  function renderTimeline(){
+    recomputeOffsets();
+    trackMain.querySelectorAll(".clip").forEach(function(e){e.remove();});
+    trackBroll.querySelectorAll(".clip").forEach(function(e){e.remove();});
+    var frag=document.createDocumentFragment();
+    clips.forEach(function(c,i){
+      var el=document.createElement("div");
+      el.className="clip"+(i%2?" alt":"")+(c.fail?" fail":"")+(selectedIds.has(c.id)?" selected":"");
+      el.setAttribute("data-cid", c.id);
+      el.setAttribute("data-idx", i);
+      var lbl=document.createElement("div"); lbl.className="clip-label"; lbl.textContent=c.label;
+      var cv=document.createElement("canvas"); cv.setAttribute("aria-hidden","true");
+      el.appendChild(cv); el.appendChild(lbl);
+      var hl=document.createElement("div"); hl.className="handle l"; hl.setAttribute("data-edge","in"); el.appendChild(hl);
+      var hr=document.createElement("div"); hr.className="handle r"; hr.setAttribute("data-edge","out"); el.appendChild(hr);
+      if(c.seamLeft){ var sm=document.createElement("div"); sm.className="split-mark"; sm.style.left="0"; el.appendChild(sm); }
+      var gl=document.createElement("div"); gl.className="gainline"; gl.setAttribute("data-gain","1");
+      gl.title="Lautstärke ziehen"; el.appendChild(gl);
+      frag.appendChild(el);
+    });
+    trackMain.appendChild(frag);
+    renderBrollClips();
+    layout();
+    updateInspector();
+    document.getElementById("tlInfo").textContent = clips.length + " Clips · " + fmtClock(totalSec);
+  }
+  function gainLineTop(gain){ return (50 - (gain/12)*35) + "%"; }   // 0dB=50%, ±12dB → 15/85%
+  function positionGainlines(){
+    trackMain.querySelectorAll(".clip").forEach(function(el){
+      var c=clips[+el.getAttribute("data-idx")]; if(!c) return;
+      var gl=el.querySelector(".gainline"); if(gl) gl.style.top=gainLineTop(c.gain||0);
+    });
+  }
+  function renderBrollClips(){
+    broll.forEach(function(b,i){
+      var el=document.createElement("div");
+      el.className="clip broll-clip"+(i===selectedBroll?" selected":""); el.setAttribute("data-broll",i);
+      var lbl=document.createElement("div"); lbl.className="clip-label";
+      lbl.textContent=(b.file||"").split("/").pop()||"B-Roll";
+      el.appendChild(lbl);
+      var hl=document.createElement("div"); hl.className="handle l"; hl.setAttribute("data-bedge","start"); el.appendChild(hl);
+      var hr=document.createElement("div"); hr.className="handle r"; hr.setAttribute("data-bedge","end"); el.appendChild(hr);
+      trackBroll.appendChild(el);
+    });
+  }
+
+  function positionClips(){
+    tlInner.style.width = Math.max(trackMain.clientWidth, Math.ceil(totalSec*pxPerSec)) + "px";
+    var mainClips=trackMain.querySelectorAll(".clip");
+    mainClips.forEach(function(el){
+      var i=+el.getAttribute("data-idx"); var c=clips[i]; if(!c) return;
+      el.style.left=(c.pStart*pxPerSec)+"px";
+      el.style.width=Math.max(2,c.dur*pxPerSec)+"px";
+    });
+    trackBroll.querySelectorAll(".clip").forEach(function(el){
+      var b=broll[+el.getAttribute("data-broll")]; if(!b) return;
+      el.style.left=(b.start*pxPerSec)+"px";
+      el.style.width=Math.max(6,(b.end-b.start)*pxPerSec)+"px";
+    });
+    renderRuler();
+    updatePlayhead();
+  }
+  function layout(){ positionClips(); positionGainlines(); drawWaveforms(); }
+
+  // CapCut-Look: display-normalisierte, gefuellte Waveform; Hoehe skaliert mit Clip-Gain
+  function drawWaveformFor(el, c){
+    // Peaks liegen auf der SOURCE-Zeitachse (kompletter Roh-Ton) — jeder Clip
+    // zeichnet seinen echten [inS, outS]-Ausschnitt. Beim Trimmen erscheint so
+    // automatisch das reale Audio des dazugekommenen/entfernten Materials
+    // (CapCut-Verhalten) statt einer gestreckten Segment-Waveform.
+    if(!peaksData||!c||c.inS==null||c.outS==null) return;
+    var sr=peaksData.sr_eff, P=peaksData.peaks;
+    var h=Math.round(parseInt(getComputedStyle(document.documentElement).getPropertyValue("--track-h"))*0.62);
+    var cv=el.querySelector("canvas"); if(!cv) return;
+    var wpx=Math.max(2,Math.round(c.dur*pxPerSec));
+    var bw=Math.min(wpx,3000);
+    cv.width=bw; cv.height=h;
+    var ctx=cv.getContext("2d"); ctx.clearRect(0,0,bw,h);
+    var start=Math.max(0, Math.round(c.inS*sr));
+    var end=Math.min(P.length, Math.round(c.outS*sr));
+    var n=end-start; if(n<=0) return;
+    var gainLin=Math.pow(10,(c.gain||0)/20);
+    var scale=peakNorm*gainLin;
+    var mid=h*0.52;
+    ctx.fillStyle="rgba(140,190,255,.92)";
+    for(var x=0;x<bw;x++){
+      var pi=start+Math.floor(x/bw*n); if(pi<0||pi>=P.length) continue;
+      var a=Math.min(1, Math.max(Math.abs(P[pi][0]), Math.abs(P[pi][1]))*scale);
+      var hh=Math.max(1, a*mid);
+      ctx.fillRect(x, mid-hh, 1, hh*2);
+    }
+    ctx.fillStyle="rgba(255,255,255,.25)";
+    ctx.fillRect(0, mid, bw, 1);
+  }
+  function drawWaveforms(){
+    if(!peaksData) return;
+    trackMain.querySelectorAll(".clip").forEach(function(el){
+      var i=+el.getAttribute("data-idx"); drawWaveformFor(el, clips[i]);
+    });
+  }
+
+  function renderRuler(){
+    var ruler=document.getElementById("ruler"); ruler.innerHTML="";
+    var targetPx=80; var rawStep=targetPx/pxPerSec;
+    var steps=[1,2,5,10,15,30,60,120,300,600]; var step=steps[steps.length-1];
+    for(var s=0;s<steps.length;s++){ if(steps[s]>=rawStep){ step=steps[s]; break; } }
+    var frag=document.createDocumentFragment();
+    for(var t=0;t<=totalSec+step;t+=step){
+      var tick=document.createElement("div"); tick.className="tick";
+      tick.style.left=(t*pxPerSec)+"px"; tick.textContent=fmtClock(t);
+      frag.appendChild(tick);
+    }
+    ruler.appendChild(frag);
+  }
+
+  // ---------- EDL-Playback auf dem QUELL-Video ----------
+  // Der Player spielt das Original und springt an jeder Schnittkante zum
+  // naechsten Clip. Dadurch zeigt Trimmen/Loeschen/Splitten SOFORT echten
+  // Inhalt (auch Material, das im Proxy nie gerendert wurde) — Fix fuer
+  // "Clip langziehen zeigt nichts".
+  var useSource=false;
+  var previewUntilProxy=null;   // Auto-Stop nach Trim-Vorschau
+
+  function proxyToSrc(t){
+    if(!useSource) return Math.max(0,t);
+    if(!clips.length) return 0;
+    if(t<=0) return clips[0].inS;
+    for(var i=0;i<clips.length;i++){ var c=clips[i];
+      if(t < c.pStart + c.dur) return c.inS + Math.max(0, t - c.pStart); }
+    return clips[clips.length-1].outS;
+  }
+  function srcToProxy(s){
+    if(!useSource) return s;
+    if(!clips.length) return 0;
+    for(var i=0;i<clips.length;i++){ var c=clips[i];
+      if(s < c.inS) return c.pStart;          // in geschnittener Luecke → Anfang des naechsten Clips
+      if(s < c.outS) return c.pStart + (s - c.inS); }
+    return totalSec;
+  }
+  function curProxyTime(){ return useSource ? srcToProxy(video.currentTime||0) : (video.currentTime||0); }
+  function seekProxy(t){
+    t=Math.max(0,Math.min(t, totalSec||t));
+    previewUntilProxy=null;
+    try{ video.currentTime=proxyToSrc(t); }catch(e){}
+    updatePlayhead();
+  }
+  function edlBoundaryJump(){
+    if(!useSource || !clips.length) return;
+    var s=video.currentTime||0;
+    for(var i=0;i<clips.length;i++){
+      var c=clips[i];
+      if(s < c.inS - 0.02){ try{ video.currentTime=c.inS; }catch(e){} return; }
+      if(s < c.outS - 0.02) return;
+      if(s < c.outS + 0.5){                     // Kante erreicht → zum naechsten Clip
+        var n=clips[i+1];
+        if(n){ try{ video.currentTime=n.inS; }catch(e){} } else { video.pause(); }
+        return;
+      }
+    }
+  }
+
+  // ---------- Playhead ----------
+  function updatePlayhead(){
+    var pt=curProxyTime();
+    var x=pt*pxPerSec;
+    document.getElementById("playhead").style.left=x+"px";
+    document.getElementById("timeLabel").textContent=fmtTime(pt)+" / "+fmtClock(totalSec||video.duration||0);
+  }
+  function playLoop(){
+    edlBoundaryJump();
+    if(previewUntilProxy!=null && curProxyTime()>=previewUntilProxy){ video.pause(); previewUntilProxy=null; }
+    updatePlayhead();
+    if(!video.paused && !video.ended){ rafId=requestAnimationFrame(playLoop); } else { rafId=null; }
+  }
+
+  // ---------- Selektion (mehrfach) + Inspector ----------
+  function syncSelectionClasses(){
+    trackMain.querySelectorAll(".clip").forEach(function(el){ el.classList.toggle("selected", selectedIds.has(el.getAttribute("data-cid"))); });
+    trackBroll.querySelectorAll(".clip").forEach(function(el){ el.classList.toggle("selected", +el.getAttribute("data-broll")===selectedBroll); });
+  }
+  function selectClip(id, additive){
+    selectedBroll=null;
+    if(additive){ if(selectedIds.has(id)) selectedIds.delete(id); else selectedIds.add(id); }
+    else { selectedIds=new Set([id]); }
+    syncSelectionClasses(); updateInspector();
+  }
+  function selectBroll(i){ selectedBroll=i; selectedIds=new Set(); syncSelectionClasses(); updateInspector(); }
+  function deselect(){ selectedIds=new Set(); selectedBroll=null; syncSelectionClasses(); updateInspector(); }
+  function selectedClips(){ return clips.filter(function(c){return selectedIds.has(c.id);}); }
+  function setGainFor(list, v){
+    list.forEach(function(c){ c.gain=(Math.abs(v)<1e-9)?0:v; });
+    positionGainlines();
+    trackMain.querySelectorAll(".clip").forEach(function(el){
+      var c=clips[+el.getAttribute("data-idx")];
+      if(c && list.indexOf(c)>=0) drawWaveformFor(el,c);
+    });
+  }
+  function updateInspector(){
+    var body=document.getElementById("inspBody");
+    if(selectedBroll!=null && broll[selectedBroll]){ return renderBrollInspector(selectedBroll); }
+    var sel=selectedClips();
+    if(!sel.length){ body.innerHTML='<p class="insp-empty">Kein Clip ausgewählt. Klick einen Clip — Shift+Klick oder Aufziehen für mehrere.</p>'; return; }
+    if(sel.length>1){
+      var dur=sel.reduce(function(a,c){return a+c.dur;},0);
+      var g0=sel[0].gain||0;
+      body.innerHTML =
+        '<div class="insp-row"><span class="k">Auswahl</span><span class="v">'+sel.length+' Clips</span></div>'+
+        '<div class="insp-row"><span class="k">Gesamtdauer</span><span class="v">'+dur.toFixed(2)+' s</span></div>'+
+        '<div class="gain-wrap"><label for="inspGain">Audio-Gain (alle)</label><div class="row">'+
+          '<input id="inspGain" type="range" min="-12" max="12" step="0.5" value="'+g0+'" aria-label="Audio-Gain für alle ausgewählten Clips">'+
+          '<span class="gain-val" id="inspGainVal">'+(g0>0?"+":"")+g0+' dB</span></div></div>'+
+        '<div style="margin-top:10px"><button id="inspDelete" class="danger" aria-label="Ausgewählte Clips löschen">'+sel.length+' Clips löschen</button></div>';
+      var slider=document.getElementById("inspGain");
+      slider.addEventListener("pointerdown", function(){ pushUndo(); }, {once:true});
+      slider.addEventListener("input", function(e){ var v=+e.target.value;
+        document.getElementById("inspGainVal").textContent=(v>0?"+":"")+v+" dB"; setGainFor(sel, v); });
+      slider.addEventListener("change", function(){ markDirty(); });
+      document.getElementById("inspDelete").addEventListener("click", deleteSelection);
+      return;
+    }
+    var c=sel[0];
+    var q=qaByJoint[c.segIdx];
+    var g=c.gain||0;
+    body.innerHTML =
+      '<div class="insp-row"><span class="k">Clip</span><span class="v">'+esc(c.label)+'</span></div>'+
+      '<div class="insp-row"><span class="k">Segment-ID</span><span class="v">'+esc(c.id)+'</span></div>'+
+      '<div class="insp-row"><span class="k">Quelle in/out</span><span class="v">'+c.inS.toFixed(3)+' / '+c.outS.toFixed(3)+'</span></div>'+
+      '<div class="insp-row"><span class="k">Dauer</span><span class="v">'+c.dur.toFixed(3)+' s</span></div>'+
+      (q?'<div class="insp-row"><span class="k">Naht-QA</span><span class="v">'+(q.pass===false?'FAIL':'ok')+' · '+(q.edge_db!==undefined?q.edge_db+' dB':'')+'</span></div>':'')+
+      '<div class="gain-wrap"><label for="inspGain">Audio-Gain</label><div class="row">'+
+        '<input id="inspGain" type="range" min="-12" max="12" step="0.5" value="'+g+'" aria-label="Audio-Gain in Dezibel">'+
+        '<span class="gain-val" id="inspGainVal">'+(g>0?"+":"")+g+' dB</span></div></div>'+
+      '<div style="display:flex; gap:8px; margin-top:10px">'+
+        '<button id="inspAudio" aria-label="Übergang vorhören">▶ Übergang</button>'+
+        '<button id="inspDelete" class="danger" aria-label="Clip löschen">Löschen</button></div>';
+    var slider=document.getElementById("inspGain");
+    slider.addEventListener("pointerdown", function(){ pushUndo(); }, {once:true});
+    slider.addEventListener("input", function(e){
+      var v=+e.target.value; document.getElementById("inspGainVal").textContent=(v>0?"+":"")+v+" dB";
+      setGainFor([c], v);
+    });
+    slider.addEventListener("change", function(){ markDirty(); });
+    document.getElementById("inspAudio").addEventListener("click", function(){ previewEdge(c, "out"); });
+    document.getElementById("inspDelete").addEventListener("click", deleteSelection);
+  }
+  function renderBrollInspector(i){
+    var b=broll[i]; var body=document.getElementById("inspBody");
+    body.innerHTML =
+      '<div class="insp-row"><span class="k">B-Roll-Slot</span><span class="v">#'+(i+1)+'</span></div>'+
+      '<div class="insp-row"><span class="k">Start / Ende</span><span class="v">'+fmtClock(b.start)+' – '+fmtClock(b.end)+'</span></div>'+
+      '<div class="insp-row"><span class="k">Dauer</span><span class="v">'+(b.end-b.start).toFixed(2)+' s</span></div>'+
+      '<div class="gain-wrap"><label for="inspBrollFile">Dateipfad</label>'+
+        '<input id="inspBrollFile" type="text" style="width:100%" placeholder="/Pfad/zum/broll.mp4" value="'+esc(b.file||"")+'" aria-label="B-Roll Dateipfad"></div>'+
+      '<p class="insp-empty" style="margin:4px 0">Position/Länge per Drag &amp; Resize in der Spur.</p>'+
+      '<div style="margin-top:10px"><button id="inspBrollDelete" class="danger" aria-label="B-Roll-Slot löschen">B-Roll löschen</button></div>';
+    document.getElementById("inspBrollFile").addEventListener("change", function(e){ pushUndo(); b.file=e.target.value.trim(); renderTimeline(); markDirty(); });
+    document.getElementById("inspBrollDelete").addEventListener("click", function(){ deleteBroll(i); });
+  }
+  function addBrollAtPlayhead(){
+    var t=curProxyTime();
+    pushUndo();
+    broll.push({ start:+t.toFixed(3), end:+(t+4).toFixed(3), file:"" });
+    renderTimeline();
+    selectBroll(broll.length-1);
+    markDirty();
+  }
+  function deleteBroll(i){
+    pushUndo(); broll.splice(i,1);
+    selectedBroll=null;
+    renderTimeline(); updateInspector(); markDirty();
+  }
+
+  // ---------- Aktionen: Trim / Split / Delete ----------
+  function affectedJoint(segIdx, edge){ return edge==="in" ? segIdx-1 : segIdx; }
+  function playJointAudio(k){
+    if(k<0||k>=segments.length-1) return;
+    video.pause();               // nie Video + Naht-Audio gleichzeitig (Doppel-Abspiel-Bug)
+    jointAudio.pause();
+    jointAudio.src="/api/joint_audio?k="+k+"&t="+Date.now();
+    jointAudio.play().catch(function(){});
+  }
+  // Trim-Vorschau: spielt ueber die frisch getrimmte Kante (Quell-EDL = sofort korrekt)
+  function previewEdge(c, edge){
+    if(!useSource){ playJointAudio(affectedJoint(c.segIdx, edge)); return; }
+    jointAudio.pause();
+    var pt=(edge==="in") ? c.pStart : (c.pStart + c.dur);
+    seekProxy(Math.max(0, pt-1.2));
+    previewUntilProxy=Math.min(totalSec, pt+1.2);
+    video.play().catch(function(){});
+  }
+
+  function deleteClipsById(ids){
+    if(!ids.length) return;
+    pushUndo();
+    var set=new Set(ids);
+    clips=clips.filter(function(c){ return !set.has(c.id); });
+    selectedIds=new Set();
+    renderTimeline(); markDirty();
+  }
+  function deleteSelection(){
+    if(selectedBroll!=null){ deleteBroll(selectedBroll); return; }
+    deleteClipsById([...selectedIds]);
+  }
+  // Split direkt im clips-Zustand: ersetzt Clip durch zwei Haelften (voll editierbar)
+  function doSplit(c, srcT){
+    var i=clips.indexOf(c); if(i<0) return null;
+    var right=Object.assign({}, c, { inS:+srcT.toFixed(4), id:newSplitIdIn(clips, c.baseId), seamLeft:true, gain:c.gain||0 });
+    var left=Object.assign({}, c, { outS:+srcT.toFixed(4) });
+    clips.splice(i, 1, left, right);
+    return {left:left, right:right, index:i};
+  }
+  function splitAtPlayhead(){
+    var t=curProxyTime();
+    var c=clips.find(function(x){ return t>=x.pStart && t<x.pStart+x.dur; });
+    if(!c){ setSaveState("dirty","Playhead in keinem Clip — kein Split"); return; }
+    var srcT=c.inS+(t-c.pStart);
+    if(srcT<=c.inS+0.05 || srcT>=c.outS-0.05){ setSaveState("dirty","Zu nah am Clip-Rand — kein Split"); return; }
+    pushUndo(); doSplit(c, srcT);
+    renderTimeline(); markDirty();
+  }
+
+  // ---------- Quick-Cut (CapCut QWE) ----------
+  function showToast(msg){
+    var el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){ el.classList.remove("show"); }, 1800);
+  }
+  // Referenzposition: Hover-Linie wenn Maus über der Timeline, sonst Playhead
+  function refProxyTime(){ return hoverTime!=null ? hoverTime : curProxyTime(); }
+  function clipAtProxy(t){
+    for(var i=0;i<clips.length;i++){ var c=clips[i]; if(t>=c.pStart && t<c.pStart+c.dur) return {clip:c,index:i}; }
+    return null;
+  }
+  // W=Cut · Q=Cut+links weg · E=Cut+rechts weg · Shift=radikal (alles links/rechts)
+  // Arbeitet direkt auf clips — funktioniert dadurch auch auf Split-Hälften beliebig oft.
+  function quickCut(mode){
+    var t=refProxyTime();
+    var hit=clipAtProxy(t);
+    if(!hit){ showToast("Keine Position über einem Clip"); return; }
+    var c=hit.clip;
+    var srcT=c.inS+(t-c.pStart);
+    if(srcT<=c.inS+0.05 || srcT>=c.outS-0.05){ showToast("Zu nah am Clip-Rand"); return; }
+    pushUndo();
+    var res=doSplit(c, srcT);
+    if(!res){ showToast("Split fehlgeschlagen"); undoStack.pop(); return; }
+    var msg="Cut";
+    var kill=new Set();
+    if(mode==="q"){ kill.add(res.left.id); msg="Cut · links weg"; }
+    else if(mode==="e"){ kill.add(res.right.id); msg="Cut · rechts weg"; }
+    else if(mode==="shiftq"){ kill.add(res.left.id); clips.slice(0,res.index).forEach(function(x){kill.add(x.id);}); msg="Cut · alles links weg"; }
+    else if(mode==="shifte"){ kill.add(res.right.id); clips.slice(res.index+2).forEach(function(x){kill.add(x.id);}); msg="Cut · alles rechts weg"; }
+    if(kill.size) clips=clips.filter(function(x){ return !kill.has(x.id); });
+    selectedIds=new Set(); selectedBroll=null;
+    renderTimeline(); markDirty(); showToast(msg);
+  }
+
+  // ---------- Hover-Linie ----------
+  function onTimelineHover(e){
+    var rect=tlInner.getBoundingClientRect();
+    var x=e.clientX-rect.left; if(x<0) x=0;
+    hoverTime=x/pxPerSec;
+    var hl=document.getElementById("hoverLine");
+    hl.style.left=x+"px"; hl.style.display="block";
+    document.getElementById("hoverLabel").textContent=fmtTime(hoverTime);
+  }
+  function onTimelineLeave(){ hoverTime=null; document.getElementById("hoverLine").style.display="none"; }
+
+  // Kanten-Drag (Trim) + Gain-Linie + Klick-Selektion
+  var drag=null;
+  function onClipPointerDown(e){
+    var handle=e.target.closest(".handle");
+    var gainline=e.target.closest(".gainline");
+    var clipEl=e.target.closest(".clip");
+    if(!clipEl) return;
+    if(clipEl.hasAttribute("data-broll")){ return onBrollPointerDown(e, clipEl, handle); }
+    var i=+clipEl.getAttribute("data-idx"); var c=clips[i]; if(!c) return;
+    if(gainline){
+      e.preventDefault();
+      // wirkt auf die ganze Auswahl, wenn der Clip Teil davon ist
+      var targets=(selectedIds.has(c.id) && selectedIds.size>1) ? selectedClips() : [c];
+      pushUndo();
+      drag={ type:"gain", targets:targets, startY:e.clientY, origs:targets.map(function(x){return x.gain||0;}), el:gainline };
+      gainline.classList.add("dragging");
+      window.addEventListener("pointermove", onDragMove);
+      window.addEventListener("pointerup", onDragUp);
+      return;
+    }
+    if(handle){
+      e.preventDefault();
+      pushUndo();
+      var edge=handle.getAttribute("data-edge");
+      drag={ type:"trim", clip:c, edge:edge, startX:e.clientX, orig:(edge==="in"?c.inS:c.outS), handle:handle, moved:false };
+      handle.classList.add("dragging");
+      window.addEventListener("pointermove", onDragMove);
+      window.addEventListener("pointerup", onDragUp);
+    } else {
+      selectClip(c.id, e.shiftKey);
+    }
+  }
+  function onDragMove(e){
+    if(!drag) return;
+    var dpx=e.clientX-drag.startX; var ds=dpx/pxPerSec;
+    if(drag.type==="trim"){
+      var c=drag.clip;
+      drag.moved=true;
+      var ci=clips.indexOf(c);
+      var prevOut=(ci>0)?clips[ci-1].outS:0;                                   // Quell-Nachbarn:
+      var nextIn=(ci>=0&&ci<clips.length-1)?clips[ci+1].inS:Infinity;          // nie hineinziehen
+      if(drag.edge==="in"){ c.inS=Math.max(prevOut+0.01, Math.min(drag.orig+ds, c.outS-0.05)); }
+      else { c.outS=Math.min(nextIn-0.01, Math.max(drag.orig+ds, c.inS+0.05)); }
+      recomputeOffsets(); positionClips();
+      var deltaMs=Math.round(((drag.edge==="in"?c.inS:c.outS)-drag.orig)*1000);
+      showTooltip(e.clientX, e.clientY, (deltaMs>0?"+":"")+deltaMs+" ms");
+    } else if(drag.type==="gain"){
+      var dGain=-(e.clientY-drag.startY)/2;   // 2px pro 1dB — feinfühlig genug
+      drag.targets.forEach(function(x,k){
+        x.gain=Math.max(-12, Math.min(12, +(drag.origs[k]+dGain).toFixed(1)));
+      });
+      positionGainlines();
+      trackMain.querySelectorAll(".clip").forEach(function(el){
+        var cx=clips[+el.getAttribute("data-idx")];
+        if(cx && drag.targets.indexOf(cx)>=0) drawWaveformFor(el,cx);
+      });
+      var g0=drag.targets[0].gain;
+      showTooltip(e.clientX, e.clientY, (g0>0?"+":"")+g0.toFixed(1)+" dB"+(drag.targets.length>1?" ("+drag.targets.length+" Clips)":""));
+    } else if(drag.type==="broll"){
+      var b=drag.b;
+      if(drag.edge==="move"){ var w=b.end-b.start; b.start=Math.max(0,drag.origStart+ds); b.end=b.start+w; }
+      else if(drag.edge==="start"){ b.start=Math.min(Math.max(0,drag.origStart+ds), b.end-0.1); }
+      else { b.end=Math.max(drag.origEnd+ds, b.start+0.1); }
+      positionClips();
+      showTooltip(e.clientX,e.clientY, fmtClock(b.start)+"–"+fmtClock(b.end));
+    }
+  }
+  function onDragUp(){
+    hideTooltip();
+    window.removeEventListener("pointermove", onDragMove);
+    window.removeEventListener("pointerup", onDragUp);
+    if(!drag) return;
+    if(drag.handle) drag.handle.classList.remove("dragging");
+    if(drag.el) drag.el.classList.remove("dragging");
+    if(drag.type==="trim"){
+      var c=drag.clip;
+      if(drag.moved){ markDirty(); drawWaveforms(); updateInspector(); previewEdge(c, drag.edge); }
+      else { undoStack.pop(); }        // reiner Klick auf Handle: kein Edit, Snapshot zurück
+    } else if(drag.type==="gain"){ markDirty(); updateInspector(); }
+    else if(drag.type==="broll"){ markDirty(); }
+    drag=null;
+  }
+
+  // B-Roll drag
+  function onBrollPointerDown(e, clipEl, handle){
+    var bi=+clipEl.getAttribute("data-broll");
+    var b=broll[bi]; if(!b) return;
+    e.preventDefault();
+    pushUndo();
+    selectBroll(bi);
+    var edge = handle ? handle.getAttribute("data-bedge") : "move";
+    drag={ type:"broll", b:b, edge:edge, startX:e.clientX, origStart:b.start, origEnd:b.end };
+    if(handle) handle.classList.add("dragging");
+    window.addEventListener("pointermove", onDragMove);
+    window.addEventListener("pointerup", onDragUp);
+  }
+
+  function showTooltip(x,y,txt){ tooltip.style.display="block"; tooltip.style.left=(x+12)+"px"; tooltip.style.top=(y-28)+"px"; tooltip.textContent=txt; }
+  function hideTooltip(){ tooltip.style.display="none"; }
+
+  // ---------- Marquee: Clips durch Aufziehen markieren ----------
+  function onMarqueeDown(e){
+    if(e.target.closest(".clip")||e.target.closest("#ruler")) return;   // Clips/Ruler haben eigene Handler
+    var rect=tlInner.getBoundingClientRect();
+    marquee={ x0:e.clientX-rect.left, moved:false, el:null, additive:e.shiftKey };
+    window.addEventListener("pointermove", onMarqueeMove);
+    window.addEventListener("pointerup", onMarqueeUp);
+  }
+  function onMarqueeMove(e){
+    if(!marquee) return;
+    var rect=tlInner.getBoundingClientRect();
+    var x1=e.clientX-rect.left;
+    if(Math.abs(x1-marquee.x0)<4 && !marquee.moved) return;
+    marquee.moved=true;
+    if(!marquee.el){ marquee.el=document.createElement("div"); marquee.el.className="marquee"; tlInner.appendChild(marquee.el); }
+    var a=Math.min(marquee.x0,x1), b=Math.max(marquee.x0,x1);
+    marquee.el.style.left=a+"px"; marquee.el.style.width=(b-a)+"px";
+    marquee.a=a/pxPerSec; marquee.b=b/pxPerSec;
+  }
+  function onMarqueeUp(){
+    window.removeEventListener("pointermove", onMarqueeMove);
+    window.removeEventListener("pointerup", onMarqueeUp);
+    if(!marquee) return;
+    if(marquee.el) marquee.el.remove();
+    if(marquee.moved){
+      var hits=clips.filter(function(c){ return c.pStart < marquee.b && (c.pStart+c.dur) > marquee.a; }).map(function(c){return c.id;});
+      if(marquee.additive){ hits.forEach(function(id){ selectedIds.add(id); }); }
+      else { selectedIds=new Set(hits); }
+      selectedBroll=null;
+      syncSelectionClasses(); updateInspector();
+    } else {
+      deselect();   // Klick ins Leere = Auswahl aufheben
+    }
+    marquee=null;
+  }
+
+  // ---------- Seek per Klick auf Ruler/Leerraum ----------
+  function seekFromEvent(e){
+    var rect=tlInner.getBoundingClientRect();
+    var x=e.clientX-rect.left; var t=x/pxPerSec;
+    seekProxy(t);
+  }
+
+  // ---------- Zoom ----------
+  // anchorX = Pixel-Offset im SICHTBAREN Scroll-Fenster (Maus bleibt auf derselben
+  // Timeline-Zeit). Waveforms werden entprellt nachgezeichnet (Lag-Fix).
+  var wfTimer=null;
+  function scheduleWaveforms(){
+    if(wfTimer) clearTimeout(wfTimer);
+    wfTimer=setTimeout(function(){ wfTimer=null; drawWaveforms(); }, 120);
+  }
+  function setZoom(v, anchorX){
+    var scroll=document.getElementById("tlScroll");
+    var ax=(anchorX!=null)?anchorX:scroll.clientWidth/2;
+    var oldT=(scroll.scrollLeft+ax)/pxPerSec;
+    pxPerSec=Math.max(0.5,Math.min(200,v));
+    document.getElementById("zoom").value=pxPerSec;
+    document.getElementById("zoomLabel").textContent=pxPerSec.toFixed(pxPerSec<10?1:0)+" px/s";
+    positionClips(); positionGainlines();
+    scheduleWaveforms();
+    scroll.scrollLeft=Math.max(0, oldT*pxPerSec-ax);
+  }
+
+  // ---------- Save / Rerender ----------
+  // timeline_clips = Quelle der Wahrheit fuer rerender.py (v2.3);
+  // Legacy-Felder bleiben fuer Kompatibilitaet/Drawer mit drin.
+  function serialize(){ return {
+    timeline_clips: clips.map(function(c){ return { id:c.id, in:+c.inS.toFixed(4), out:+c.outS.toFixed(4), gain:+(c.gain||0) }; }),
+    nudges:nudges, gains:gains, broll:broll,
+    extra_cut_word_ids:[...extraCut], uncut_word_ids:[...uncut],
+    deleted_segments:[...deleted], splits:splits }; }
+  function save(){
+    setSaveState("saving","speichert …");
+    return fetch("/api/overrides",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(serialize())})
+      .then(function(r){return r.json();}).then(function(j){
+        if(j.ok){ dirty=false; setSaveState("saved","gespeichert ✓"); return true; }
+        setSaveState("dirty","Fehler beim Speichern"); return false;
+      }).catch(function(){ setSaveState("dirty","Netzwerk-Fehler"); return false; });
+  }
+  var renderPoll=null;
+  function setRenderBusy(b){ var btn=document.getElementById("btnRerender"); btn.disabled=b; btn.setAttribute("aria-busy", b?"true":"false"); }
+  function pollRenderStatus(){
+    fetch("/api/render_status").then(function(r){return r.json();}).then(function(j){
+      if(j.status==="running"){ var last=(j.log||"").trim().split("\n").pop()||""; setRenderState("saving","Rendert … "+last.slice(0,60)); }
+      else if(j.status==="done"){ clearInterval(renderPoll); renderPoll=null; setRenderBusy(false); setRenderState("saved","Render fertig ✓ — Seite neu laden"); }
+      else if(j.status==="failed"){ clearInterval(renderPoll); renderPoll=null; setRenderBusy(false); setRenderState("dirty","Render fehlgeschlagen (exit "+j.exit+")"); }
+    }).catch(function(){});
+  }
+  function startRenderJob(){
+    fetch("/api/rerender",{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"})
+      .then(function(r){ return r.json().then(function(j){return {status:r.status,body:j};}); })
+      .then(function(res){
+        if(res.status===200){ setRenderState("saving","Render läuft …"); if(renderPoll) clearInterval(renderPoll); renderPoll=setInterval(pollRenderStatus,3000); }
+        else { setRenderBusy(false); setRenderState("dirty","Rerender: "+(res.body.error||("Fehler "+res.status))); }
+      }).catch(function(){ setRenderBusy(false); setRenderState("dirty","Rerender-Fehler"); });
+  }
+  function rerender(){
+    setRenderBusy(true); setRenderState("saving","Speichert vor Render …");
+    save().then(function(ok){ if(ok){ startRenderJob(); } else { setRenderBusy(false); setRenderState("dirty","Speichern fehlgeschlagen — nicht gerendert"); } });
+  }
+  function undo(){
+    if(!undoStack.length){ setSaveState("dirty","Nichts rückgängig"); return; }
+    restore(undoStack.pop());
+    renderTranscript(); renderJoints(); renderTimeline(); markDirty();
+  }
+
+  // ---------- Drawer: Transkript + Nähte ----------
+  function renderTranscript(){
+    var c=document.getElementById("transcript"); var html=[];
+    for(var i=0;i<words.length;i++){ var w=words[i]; var cls="w"+(isCut(w.id)?" cut":"");
+      html.push('<span class="'+cls+'" data-wid="'+w.id+'">'+esc(w.text)+'</span> '); }
+    c.innerHTML=html.join("");
+  }
+  function renderJoints(){
+    var host=document.getElementById("jointList"); var order=[];
+    for(var k=0;k<segments.length-1;k++) order.push(k);
+    order.sort(function(a,b){ var fa=isJointFail(a)?1:0, fb=isJointFail(b)?1:0; if(fa!==fb) return fb-fa; return a-b; });
+    var html=[];
+    order.forEach(function(k){ var q=qaByJoint[k]||{}; var fail=q.pass===false;
+      html.push('<div class="jrow"><span class="badge '+(fail?"fail":"pass")+'">'+(fail?"FAIL":"ok")+'</span>'+
+        '<span>Naht '+k+'</span><span style="color:var(--muted-2)">'+(q.edge_db!==undefined?q.edge_db+" dB":"")+'</span>'+
+        '<span style="flex:1"></span>'+
+        '<button class="ghost" data-jaudio="'+k+'" aria-label="Naht-Audio '+k+'">▶</button>'+
+        '<button class="ghost" data-jjump="'+k+'" aria-label="Zu Naht '+k+' springen">⭘</button></div>'); });
+    host.innerHTML=html.join("");
+  }
+
+  // ---------- Keyboard ----------
+  function isTyping(e){ var t=e.target; return t && (t.tagName==="INPUT"||t.tagName==="TEXTAREA"||t.isContentEditable||(t.closest&&t.closest("#claudePane"))); }
+  function setupKeyboard(){
+    window.addEventListener("keydown", function(e){
+      if(isTyping(e)) return;
+      var mod=e.metaKey||e.ctrlKey;
+      if(mod && (e.key==="s"||e.key==="S")){ e.preventDefault(); save(); return; }
+      if(mod && (e.key==="z"||e.key==="Z")){ e.preventDefault(); undo(); return; }
+      if(mod) return;
+      if(e.key===" "){ e.preventDefault(); togglePlay(); }
+      else if(e.key==="ArrowLeft"){ e.preventDefault(); seekBy(e.shiftKey?-5:-1); }
+      else if(e.key==="ArrowRight"){ e.preventDefault(); seekBy(e.shiftKey?5:1); }
+      else if(e.key==="+"||e.key==="="){ e.preventDefault(); setZoom(pxPerSec*1.3); }
+      else if(e.key==="-"||e.key==="_"){ e.preventDefault(); setZoom(pxPerSec/1.3); }
+      else if(e.key==="w"||e.key==="W"){ e.preventDefault(); quickCut("w"); }
+      else if(e.key==="q"||e.key==="Q"){ e.preventDefault(); quickCut(e.shiftKey?"shiftq":"q"); }
+      else if(e.key==="e"||e.key==="E"){ e.preventDefault(); quickCut(e.shiftKey?"shifte":"e"); }
+      else if(e.key==="s"||e.key==="S"){ e.preventDefault(); splitAtPlayhead(); }
+      else if(e.key==="Delete"||e.key==="Backspace"){ e.preventDefault(); deleteSelection(); }
+      else if(e.key==="Escape"){ deselect(); }
+    });
+  }
+  function seekBy(d){ seekProxy(curProxyTime()+d); }
+  function togglePlay(){
+    previewUntilProxy=null; jointAudio.pause();
+    if(video.paused){
+      // CapCut-Verhalten: steht die Maus-Linie über der Timeline, startet Play DORT
+      if(hoverTime!=null) seekProxy(hoverTime);
+      else if(useSource) edlBoundaryJump();      // sonst: falls Playhead in einer Luecke steht
+      video.play().catch(function(){});
+    } else { video.pause(); }
+  }
+
+  // ---------- Init ----------
+  function buildWordToSeg(){ var idToI={}; for(var i=0;i<words.length;i++) idToI[words[i].id]=i;
+    for(var s=0;s<segments.length;s++){ var a=idToI[segments[s].first_id], b=idToI[segments[s].last_id]; if(a==null||b==null) continue; for(var j=a;j<=b;j++) wordToSeg[words[j].id]=s; } }
+
+  function setupEvents(){
+    document.getElementById("btnPlay").addEventListener("click", togglePlay);
+    video.addEventListener("play", function(){ document.getElementById("btnPlay").textContent="⏸ Pause"; if(!rafId) rafId=requestAnimationFrame(playLoop); });
+    video.addEventListener("pause", function(){ document.getElementById("btnPlay").textContent="▶ Play"; });
+    video.addEventListener("timeupdate", function(){ edlBoundaryJump(); updatePlayhead(); });
+    video.addEventListener("seeked", updatePlayhead);
+
+    trackMain.addEventListener("pointerdown", onClipPointerDown);
+    trackBroll.addEventListener("pointerdown", onClipPointerDown);
+    document.getElementById("ruler").addEventListener("pointerdown", seekFromEvent);
+
+    var scroll=document.getElementById("tlScroll");
+    scroll.addEventListener("pointerdown", onMarqueeDown);
+    scroll.addEventListener("pointermove", onTimelineHover);
+    scroll.addEventListener("pointerleave", onTimelineLeave);
+    scroll.addEventListener("dblclick", seekFromEvent);
+    scroll.addEventListener("wheel", function(e){
+      if(e.metaKey||e.ctrlKey){
+        e.preventDefault();
+        var sx=scroll.getBoundingClientRect().left;
+        setZoom(pxPerSec*(e.deltaY<0?1.12:0.89), e.clientX-sx);   // Anker = Maus im Sichtfenster
+      }
+    }, {passive:false});
+
+    document.getElementById("zoom").addEventListener("input", function(e){ setZoom(+e.target.value); });
+    document.getElementById("zoomIn").addEventListener("click", function(){ setZoom(pxPerSec*1.3); });
+    document.getElementById("zoomOut").addEventListener("click", function(){ setZoom(pxPerSec/1.3); });
+    document.getElementById("btnAddBroll").addEventListener("click", addBrollAtPlayhead);
+
+    document.getElementById("btnSave").addEventListener("click", save);
+    document.getElementById("btnRerender").addEventListener("click", rerender);
+    document.getElementById("btnUndo").addEventListener("click", undo);
+
+    var drawer=document.getElementById("drawer");
+    document.getElementById("btnDrawer").addEventListener("click", function(){
+      var open=drawer.classList.toggle("open");
+      drawer.setAttribute("aria-hidden", open?"false":"true");
+      this.setAttribute("aria-expanded", open?"true":"false");
+    });
+    document.getElementById("drawerClose").addEventListener("click", function(){
+      drawer.classList.remove("open"); drawer.setAttribute("aria-hidden","true");
+      document.getElementById("btnDrawer").setAttribute("aria-expanded","false");
+    });
+
+    document.getElementById("transcript").addEventListener("click", function(e){
+      var w=e.target.closest(".w"); if(!w) return; var id=w.getAttribute("data-wid");
+      pushUndo(); setCut(id,!isCut(id)); w.classList.toggle("cut", isCut(id)); markDirty();
+    });
+    document.getElementById("jointList").addEventListener("click", function(e){
+      var a=e.target.closest("[data-jaudio]"); var j=e.target.closest("[data-jjump]");
+      if(a){ playJointAudio(+a.getAttribute("data-jaudio")); }
+      else if(j){ var k=+j.getAttribute("data-jjump"); var c=clips.find(function(x){return x.segIdx===k||x.segIdx===k+1;}); if(c){ seekProxy(c.pStart); } }
+    });
+    window.addEventListener("resize", positionClips);
+  }
+
+  function init(state){
+    words=state.words||[]; segments=state.segments||[]; qa=state.qa||[];
+    baseCut=new Set((state.decisions&&state.decisions.cut_word_ids)||[]);
+    var o=state.overrides||{};
+    extraCut=new Set(o.extra_cut_word_ids||[]); uncut=new Set(o.uncut_word_ids||[]);
+    nudges=o.nudges||{}; gains=o.gains||{}; broll=o.broll||[];
+    deleted=new Set(o.deleted_segments||[]); splits=o.splits||[];
+    qaByJoint={}; qa.forEach(function(x){ qaByJoint[x.joint]=x; });
+    buildWordToSeg();
+    var keep=state.segMeta&&state.segMeta.keep_s;
+    document.getElementById("statSummary").textContent=segments.length+" Segmente · "+words.length+" Wörter"+(keep?" · "+Math.round(keep)+"s":"");
+    if(state.sourceUrl){ useSource=true; video.src=state.sourceUrl; }
+    else { video.src=state.proxyUrl||"/media/proxy.mp4"; }
+    // Clips: gespeicherte Timeline hat Vorrang, sonst Erst-Aufbau aus Segmenten
+    clips=(o.timeline_clips&&o.timeline_clips.length) ? clipsFromSaved(o.timeline_clips) : freshClips();
+    renderTranscript(); renderJoints(); setupEvents(); setupKeyboard();
+    renderTimeline();
+    if(useSource) seekProxy(0);   // Start = Anfang des ERSTEN Clips, nicht Quell-Sekunde 0
+    setSaveState("saved","bereit");
+    // Waveform-Peaks laden (kann beim ersten Mal kurz dauern)
+    setSaveState("saving","Waveform lädt …");
+    fetch("/api/peaks").then(function(r){return r.json();}).then(function(p){
+      peaksData=p;
+      var mx=0.02;
+      for(var i=0;i<p.peaks.length;i++){ var a=Math.max(Math.abs(p.peaks[i][0]),Math.abs(p.peaks[i][1])); if(a>mx) mx=a; }
+      peakNorm=0.95/mx;   // Display-Normalisierung: lauteste Stelle ≈ volle Wellenhöhe
+      drawWaveforms(); setSaveState("saved","bereit");
+    }).catch(function(){ setSaveState("dirty","Waveform-Fehler"); });
+  }
+
+  fetch("/api/state").then(function(r){return r.json();}).then(init).catch(function(e){ document.getElementById("statSummary").textContent="Fehler: "+e; });
+})();
+
+// ---------- Claude-Terminal (rechte Spalte, echtes PTY via SSE) ----------
+(function(){
+  var TermCtor = window.Terminal && window.Terminal.Terminal ? window.Terminal.Terminal : window.Terminal;
+  var FitCtor = window.FitAddon && window.FitAddon.FitAddon ? window.FitAddon.FitAddon : window.FitAddon;
+  var host = document.getElementById("claudeTermHost");
+  var pane = document.getElementById("claudePane");
+  var inspPane = document.getElementById("inspectorPane");
+  var tabC = document.getElementById("tabClaude");
+  var tabI = document.getElementById("tabInspector");
+  var inspDot = document.getElementById("inspDot");
+  var exitOv = document.getElementById("claudeExit");
+  if(!TermCtor || !host){ if(tabC) tabC.style.display="none"; return; }
+  var term = new TermCtor({
+    fontSize: 12,
+    fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+    theme: { background: "#0a0a0d", foreground: "#e5e7eb", cursor: "#f97316" },
+    cursorBlink: true,
+    scrollback: 5000
+  });
+  var fit = FitCtor ? new FitCtor() : null;
+  if(fit) term.loadAddon(fit);
+  term.open(host);
+  function doFit(){
+    if(!fit || pane.style.display==="none") return;
+    try { fit.fit(); } catch(_){}
+    fetch("/api/term/resize", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({cols: term.cols, rows: term.rows})}).catch(function(){});
+  }
+  new ResizeObserver(function(){ doFit(); }).observe(host);
+  term.onData(function(d){
+    fetch("/api/term/input", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({data: btoa(unescape(encodeURIComponent(d)))})}).catch(function(){});
+  });
+  function b64ToBytes(b64){
+    var bin = atob(b64); var arr = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    return arr;
+  }
+  var es = null;
+  function connect(){
+    es = new EventSource("/api/term/stream");
+    // Bei jedem (Re-)Connect schickt der Server den Ring-Buffer als Replay —
+    // Terminal vorher leeren, sonst doppelter Inhalt nach Reconnect.
+    es.onopen = function(){ term.reset(); };
+    es.onmessage = function(ev){ term.write(b64ToBytes(ev.data)); };
+    es.addEventListener("exit", function(){ exitOv.style.display="flex"; es.close(); });
+  }
+  connect();
+  document.getElementById("btnTermRestart").addEventListener("click", function(){
+    fetch("/api/term/restart", {method:"POST"}).then(function(){
+      exitOv.style.display="none"; term.reset();
+      if(es) es.close(); connect(); setTimeout(doFit, 150);
+    }).catch(function(){});
+  });
+  function showClaude(){
+    tabC.classList.add("active"); tabI.classList.remove("active");
+    pane.style.display=""; inspPane.style.display="none";
+    setTimeout(doFit, 30); term.focus();
+  }
+  function showInspector(){
+    tabI.classList.add("active"); tabC.classList.remove("active");
+    pane.style.display="none"; inspPane.style.display="";
+    inspDot.style.display="none";
+  }
+  tabC.addEventListener("click", showClaude);
+  tabI.addEventListener("click", showInspector);
+  // Badge: Clip ausgewählt während Claude-Tab offen → Punkt am Inspector-Tab
+  new MutationObserver(function(){
+    if(inspPane.style.display==="none" && !document.querySelector("#inspBody .insp-empty")){
+      inspDot.style.display="";
+    }
+  }).observe(document.getElementById("inspBody"), {childList:true, subtree:true});
+  setTimeout(doFit, 100);
+})();
+</script>
